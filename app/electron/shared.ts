@@ -13,6 +13,8 @@ export interface BatchResult { succeeded: string[]; failed: { id: string; error:
 export interface Overview { active: number; trash: number; tags: { name: string; count: number }[] }
 export interface AppInfo { dataDir: string; version: string; lastBackup: string | null; backupWarning: string | null }
 export type Result<T> = { ok: true; data: T } | { ok: false; error: string };
+export type TextMenuAction = 'copyPlain' | 'pastePlain' | 'copyAllPlain';
+export interface TextMenuOptions { mode: 'context' | 'toolbar'; hasSelection: boolean; hasText: boolean; editable: boolean; x: number; y: number }
 export interface NotesAPI {
   list(filter: Filter): Promise<NoteSummary[]>; overview(): Promise<Overview>;
   create(): Promise<NoteDetail>; get(id: string): Promise<NoteDetail>; save(input: NoteInput): Promise<Note>;
@@ -26,6 +28,8 @@ export interface NotesAPI {
   openAttachment(id: string): Promise<void>; openLink(url: string): Promise<void>;
   backup(): Promise<string | null>; restoreBackup(): Promise<boolean>; exportNotes(id?: string): Promise<string | null>;
   info(): Promise<AppInfo>; openDataDir(): Promise<void>;
+  readClipboardText(): Promise<string>; writeClipboardText(text: string): Promise<void>;
+  showTextMenu(options: TextMenuOptions): Promise<TextMenuAction | null>;
   readyToClose(): Promise<void>; onCloseRequested(callback: () => void): () => void;
   onOperation(callback: (busy: boolean) => void): () => void;
   pathsForFiles(files: File[]): string[];

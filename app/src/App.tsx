@@ -1,11 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { EditorContent, useEditor } from '@tiptap/react';
+import { EditorState } from '@tiptap/pm/state';
 import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
 import Placeholder from '@tiptap/extension-placeholder';
-import { NotebookPen, Plus, Search, FolderOpen, Trash2, Pin, Tag, Settings2, ChevronDown, MoreHorizontal, ArrowUpRight, Paperclip, ImagePlus, Bold, Italic, Heading2, List, ListOrdered, Link, Undo2, Redo2, X, Check, CircleAlert, RotateCcw, Download, Upload, FileText, ArchiveRestore, HardDrive, LoaderCircle, CheckCheck, BookOpen, Maximize2, PanelLeftClose,PanelLeftOpen,PanelLeft,Columns2,Focus,CheckSquare } from 'lucide-react';
-import type { AppInfo, Attachment, Filter, Note, NoteDetail, NoteSummary, Overview, RichNode,SortOrder } from '../electron/shared';
+import { NotebookPen, Plus, Search, FolderOpen, Trash2, Pin, Tag, Settings2, ChevronDown, MoreHorizontal, ArrowUpRight, Paperclip, ImagePlus, Bold, Italic, Heading2, List, ListOrdered, Link, Undo2, Redo2, X, Check, CircleAlert, RotateCcw, Download, Upload, FileText, ArchiveRestore, HardDrive, LoaderCircle, CheckCheck, BookOpen, Maximize2, PanelLeftClose,PanelLeftOpen,PanelLeft,Columns2,Focus,CheckSquare, ClipboardType, Copy } from 'lucide-react';
+import type { AppInfo, Attachment, Filter, Note, NoteDetail, NoteSummary, Overview, RichNode,SortOrder,TextMenuAction } from '../electron/shared';
 import {usePanels,Splitter,rangeSelection} from './layout';
+import {insertPlainText,notePlainText,plainText} from './plain-text';
 
 const LocalImage = Image.extend({
   addAttributes() { return { ...this.parent?.(), assetId: { default: null }, width: { default: 560, renderHTML: attrs => ({ width: attrs.width, style: `max-width:100%;width:${attrs.width}px;height:auto` }) } }; }
@@ -29,6 +31,9 @@ export default function App() {
   const [toast, setToast] = useState<{ message: string; error?: boolean } | null>(null), [menu, setMenu] = useState(false), [noteMenu, setNoteMenu] = useState(false), [help, setHelp] = useState(false);
   const [info, setInfo] = useState<AppInfo | null>(null), [zoom, setZoom] = useState<string | null>(null), [tagInput, setTagInput] = useState(''), [, forceToolbar] = useState(0);
   const [linkValue, setLinkValue] = useState<string | null>(null);
+  const [clipboardBusy,setClipboardBusy] = useState(false), [textMenuOpen,setTextMenuOpen] = useState(false);
+  const textActionRef = useRef<(action: TextMenuAction) => void>(() => {});
+  const textMenuRef = useRef<(mode:'context'|'toolbar',x:number,y:number) => void>(() => {});
   const {preferences:layout,setPreferences:setLayout,sizes,style:layoutStyle}=usePanels();
   const [sort,setSort]=useState<SortOrder>(()=>{const s=localStorage.getItem('suishouji:sort');return s==='title'||s==='created'?s:'updated';});
   const [selecting,setSelecting]=useState(false),[checked,setChecked]=useState<Set<string>>(new Set());
@@ -50,7 +55,19 @@ export default function App() {
   const editor = useEditor({
     extensions: [StarterKit.configure({ heading: { levels: [1,2,3] }, link: { openOnClick: false, autolink: false, protocols: ['http','https'] } }), LocalImage, Placeholder.configure({ placeholder: '在这里写下想记住的事…\n也可以粘贴截图，或把文件拖进来。' })],
     editorProps: {
-      attributes: { 'aria-label': '记录正文', class: 'note-prose' },
+      attributes: { 'aria-label': '记录正文', class: 'note-prose', tabindex: '0' },
+      handleDOMEvents: {
+        keydown: (_view,event) => {
+          if (event.isComposing || event.altKey || !(event.ctrlKey || event.metaKey) || !event.shiftKey) return false;
+          const key = event.key.toLowerCase();
+          if (key !== 'c' && key !== 'v') return false;
+          event.preventDefault(); event.stopPropagation();
+          textActionRef.current(key === 'c' ? 'copyPlain' : 'pastePlain'); return true;
+        },
+        contextmenu: (_view,event) => {
+          event.preventDefault(); textMenuRef.current('context',event.clientX,event.clientY); return true;
+        }
+      },
       handlePaste: (_view, event) => {
         const files = [...(event.clipboardData?.files ?? [])];
         if (files.length) { event.preventDefault(); pasteRef.current(files, true); return true; }
@@ -74,9 +91,49 @@ export default function App() {
     onTransaction: () => forceToolbar(n => n + 1)
   });
   useEffect(() => { editor?.setEditable(!readOnly, false); }, [editor, readOnly]);
+  function textTarget() {
+    if (!editor || !current.current) return null;
+    return { id:current.current.note.id, title:current.current.note.title, doc:editor.state.doc, selection:editor.state.selection };
+  }
+  async function textAction(action:TextMenuAction,target=textTarget()) {
+    if (!editor || !target || blocked || clipboardBusy) return;
+    if (current.current?.note.id !== target.id) return;
+    if (action === 'pastePlain' && readOnly) return;
+    setClipboardBusy(true);
+    try {
+      if (action === 'pastePlain') {
+        const text = await api.readClipboardText();
+        // Clipboard IPC is async: never insert into another note/cursor if the
+        // user changed the editing target while the OS was responding.
+        if (editor.isDestroyed || current.current?.note.id !== target.id || editor.state.doc !== target.doc || !editor.state.selection.eq(target.selection) || !editor.isEditable) return;
+        if (!text) { notify('剪贴板里没有可粘贴的文字'); return; }
+        insertPlainText(editor.view,text); notify('已粘贴为纯文本');
+      } else {
+        const text = action === 'copyAllPlain' ? notePlainText(target.title,plainText(target.doc)) : plainText(target.doc,target.selection.from,target.selection.to);
+        if (!text.length) { notify(action === 'copyAllPlain' ? '这条记录还没有可复制的文字' : '请先在正文中选中文字'); return; }
+        await api.writeClipboardText(text);
+        notify(action === 'copyAllPlain' ? '已复制全文纯文本，包含标题和正文' : '已复制为纯文本');
+      }
+    } catch (e) { report(e); } finally { setClipboardBusy(false); }
+  }
+  textActionRef.current = action => { void textAction(action); };
+  async function showTextMenu(mode:'context'|'toolbar',x:number,y:number) {
+    const target = textTarget(); if (!editor || !target || blocked || clipboardBusy || textMenuOpen) return;
+    setMenu(false); setNoteMenu(false); setContext(null); setTextMenuOpen(true);
+    editor.view.focus();
+    try {
+      const action = await api.showTextMenu({mode,x,y,hasSelection:!target.selection.empty,
+        hasText:!!plainText(target.doc,target.selection.from,target.selection.to).length,editable:!readOnly});
+      if (action) await textAction(action,target);
+    } catch (e) { report(e); } finally { setTextMenuOpen(false); }
+  }
+  textMenuRef.current = (mode,x,y) => { void showTextMenu(mode,x,y); };
   function showDetail(next: NoteDetail | null) {
     current.current = next; rev.current = 0; savedRev.current = 0; setDetail(next); setTagInput(''); setStatus('saved'); setNoteMenu(false);
     editor?.commands.setContent(next?.note.document ?? { type:'doc', content:[{ type:'paragraph' }] }, { emitUpdate: false });
+    // Each record has its own editing session. setContent alone keeps undo
+    // history, which could otherwise restore a previous record into this one.
+    if (editor) editor.view.updateState(EditorState.create({ schema:editor.schema, doc:editor.state.doc, plugins:editor.state.plugins }));
     if (next && !next.note.deletedAt) localStorage.setItem('suishouji:last-note', next.note.id);
   }
   async function refresh() {
@@ -288,6 +345,7 @@ export default function App() {
           {status === 'error' && <button onClick={() => void flush()}>重试</button>}</div>
           <div className="editor-actions">{!note.deletedAt && <button className="attachment-trigger" aria-label="添加图片或文件" disabled={blocked} onClick={() => void pickFiles()}><Paperclip size={16}/><span>图片 / 文件</span></button>}{note.deletedAt ? <button className="text-button" disabled={blocked} onClick={() => void batchAction('restore',[note.id])}><RotateCcw size={15}/>恢复记录</button> : <IconButton title={note.pinned ? '取消置顶' : '置顶记录'} active={note.pinned} disabled={blocked} onClick={() => void act(async () => { await api.pin(note.id, !note.pinned); const updated = await api.get(note.id); current.current = updated; setDetail(updated); })}><Pin size={17}/></IconButton>}
             <div className="note-menu-anchor"><IconButton title="更多记录操作" onClick={() => setNoteMenu(!noteMenu)} disabled={blocked}><MoreHorizontal size={21}/></IconButton>{noteMenu && <div className="dropdown note-menu" onClick={e => e.stopPropagation()}>
+              <button disabled={clipboardBusy} onClick={() => { setNoteMenu(false); void textAction('copyAllPlain'); }}><Copy/>复制全文为纯文本</button>
               <button onClick={() => void act(() => api.exportNotes(note.id), '记录已导出')}><Upload/>导出这条记录</button>
               {note.deletedAt ? <button className="danger" onClick={() => void batchAction('remove',[note.id])}><Trash2/>永久删除</button> : <button className="danger" onClick={() => void batchAction('delete',[note.id])}><Trash2/>移到回收站</button>}
             </div>}</div>
@@ -306,9 +364,10 @@ export default function App() {
             <IconButton title="编号列表" active={editor?.isActive('orderedList')} disabled={readOnly} onClick={() => editor?.chain().focus().toggleOrderedList().run()}><ListOrdered size={18}/></IconButton>
             <IconButton title="插入网页链接" active={editor?.isActive('link')} disabled={readOnly} onClick={() => setLinkValue(editor?.getAttributes('link').href ?? 'https://')}><Link size={16}/></IconButton><i/>
             <IconButton title="添加图片或附件" disabled={readOnly} onClick={() => void pickFiles()}><ImagePlus size={17}/></IconButton>
+            <button type="button" className="plain-text-trigger" aria-label="纯文本复制与粘贴" title="纯文本复制与粘贴" aria-haspopup="menu" aria-expanded={textMenuOpen} disabled={blocked||clipboardBusy} onMouseDown={e=>e.preventDefault()} onClick={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();void showTextMenu('toolbar',rect.left,rect.bottom+4);}}><ClipboardType size={16}/><span>纯文本</span><ChevronDown size={12}/></button>
             <span className="toolbar-spacer"/>
-            <IconButton title="撤销 Ctrl+Z" disabled={readOnly || !editor?.can().undo()} onClick={() => editor?.chain().focus().undo().run()}><Undo2 size={16}/></IconButton>
-            <IconButton title="重做 Ctrl+Y" disabled={readOnly || !editor?.can().redo()} onClick={() => editor?.chain().focus().redo().run()}><Redo2 size={16}/></IconButton>
+            <div className="toolbar-history"><IconButton title="撤销 Ctrl+Z" disabled={readOnly || !editor?.can().undo()} onClick={() => editor?.chain().focus().undo().run()}><Undo2 size={16}/></IconButton>
+            <IconButton title="重做 Ctrl+Y" disabled={readOnly || !editor?.can().redo()} onClick={() => editor?.chain().focus().redo().run()}><Redo2 size={16}/></IconButton></div>
           </div>
           {editor?.isActive('image') && !readOnly && <div className="image-controls"><Maximize2 size={13}/><span>图片大小</span>{[280,560,800].map(w => <button key={w} onClick={() => editor.chain().focus().updateAttributes('image', {width:w}).run()}>{w === 280 ? '小' : w === 560 ? '中' : '大'}</button>)}<span>· 点击图片查看原图</span></div>}
           <EditorContent editor={editor}/>
@@ -334,6 +393,7 @@ export default function App() {
       <button className="modal-close" aria-label="关闭说明" onClick={() => setHelp(false)}><X size={19}/></button><div className="brand-icon"><NotebookPen size={24}/></div><h2>用起来，就这么简单。</h2>
       <p>点击新建，直接输入。文字自动保存；截图可以粘贴，图片和文件可以拖入。标签输入后按回车即可添加。</p>
       <div className="shortcut-help"><span><kbd>Ctrl N</kbd> 新建记录</span><span><kbd>Ctrl F</kbd> 搜索记录</span><span><kbd>Ctrl S</kbd> 立即保存</span></div>
+      <p>选中正文后按 <strong>Ctrl+Shift+C</strong> 复制为纯文本，按 <strong>Ctrl+Shift+V</strong> 粘贴为纯文本；也可右键正文或点击工具栏“纯文本”。去掉来源格式并保留换行，粘贴位置已有的段落或列表布局会保留。记录右上角“更多记录操作”可复制全文纯文本，包含标题和正文，不包含图片及附件。原有 Ctrl+C / Ctrl+V 保留格式复制和粘贴。</p>
       <p>列表上方点击“多选”，或按住 Ctrl 点击记录。Shift 点击连续选择；全选只选中当前筛选结果。在列表中按 Delete 可以删除所选记录，输入文字时仍按正常文字编辑处理。</p>
       <p>移入回收站后，右下角有 10 秒“撤销”。回收站可批量恢复或永久删除；右键记录也有常用操作。</p>
       <p>拖动两栏之间的分隔线调整宽度，双击恢复默认。正文上方的三个布局按钮可收起导航、隐藏列表或进入专注模式；Ctrl+F 会自动展开搜索。布局、排序和窗口大小都会记住。</p>

@@ -1,11 +1,11 @@
-import { app, BrowserWindow, dialog, ipcMain, protocol, net, shell, screen } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, protocol, net, shell, screen, type MenuItemConstructorOptions } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Store } from './store.js';
 import { createBackup, validateBackup, applyRestore, recoverInterruptedRestore, exportHtml } from './archive.js';
-import type { Filter, NoteInput } from './shared.js';
+import type { Filter, NoteInput, TextMenuAction, TextMenuOptions } from './shared.js';
 import { fitWindow,readWindowState,writeWindowState } from './window-state.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -95,6 +95,33 @@ const methods: Record<string, (...args: any[]) => unknown> = {
   },
   info: () => ({ dataDir, version: app.getVersion(), lastBackup, backupWarning }),
   openDataDir: async () => { await shell.openPath(dataDir); },
+  readClipboardText: () => clipboard.readText(),
+  writeClipboardText: (text: string) => {
+    if (typeof text !== 'string') throw new Error('复制内容必须是文字');
+    return clipboard.writeText(text);
+  },
+  showTextMenu: (options: TextMenuOptions) => new Promise<TextMenuAction | null>(resolve => {
+    if (!win || !options || !['context','toolbar'].includes(options.mode)) throw new Error('无法打开文字菜单');
+    const item = (label: string, action: TextMenuAction, enabled: boolean, accelerator?: string): MenuItemConstructorOptions =>
+      ({ label, enabled, accelerator, registerAccelerator: false, click: () => resolve(action) });
+    const template: MenuItemConstructorOptions[] = options.mode === 'context' ? [
+      { role: 'cut', label: '剪切', enabled: options.editable && options.hasSelection },
+      { role: 'copy', label: '复制', enabled: options.hasSelection },
+      item('复制为纯文本', 'copyPlain', options.hasText, 'CommandOrControl+Shift+C'),
+      { type: 'separator' },
+      { role: 'paste', label: '粘贴', enabled: options.editable },
+      item('粘贴为纯文本', 'pastePlain', options.editable, 'CommandOrControl+Shift+V'),
+      { type: 'separator' }, { role: 'selectAll', label: '全选' }
+    ] : [
+      item('复制为纯文本', 'copyPlain', options.hasText, 'CommandOrControl+Shift+C'),
+      item('粘贴为纯文本', 'pastePlain', options.editable, 'CommandOrControl+Shift+V'),
+      { type: 'separator' }, item('复制全文为纯文本', 'copyAllPlain', true)
+    ];
+    const [width,height] = win.getContentSize();
+    const menu = Menu.buildFromTemplate(template);
+    menu.popup({ window: win, x: Math.max(0,Math.min(width-1,Math.round(options.x)||0)),
+      y: Math.max(0,Math.min(height-1,Math.round(options.y)||0)), callback: () => resolve(null) });
+  }),
   readyToClose: () => { if (!busy) { mayClose = true; win?.close(); } }
 };
 

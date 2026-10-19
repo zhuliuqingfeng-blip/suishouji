@@ -22,10 +22,12 @@ Git 只管理源码、测试、配置和文档，不收录软件成品、个人�
 
 进入 `app` 目录执行 `npm ci --cache ../.cache/npm`、`npm run setup`、`npm run dev`。已有依赖时无需重复安装。
 
-`npm run build` 构建，`npm test` 运行数据测试，`npm run test:ui`、`npm run test:ux` 和 `npm run test:workspace` 验证实际窗口。`npm run test:dev` 检查开发服务器；`npm run test:portable` 检查打包暂存副本的整套搬迁。所有验收使用隔离数据。
+`npm run build` 构建，`npm test` 运行数据测试，`npm run test:ui`、`npm run test:ux` 和 `npm run test:workspace` 验证实际窗口。`npm run test:clipboard` 检查真实剪贴板、纯文本操作与窄窗口工具栏；`npm run test:dev` 检查开发服务器；`npm run test:portable` 检查打包暂存副本的整套搬迁。所有验收使用隔离数据。
 
 `npm run package` 打包至 `.artifacts/staging/`，`npm run release` 生成便携包和源码包。正常关闭已安装程序后，执行 `node scripts/upgrade.mjs` 安全升级。
 
 1.2 新增多选删除和恢复、10秒删除撤销、记录右键菜单、排序选择、两栏独立拖动与收起、专注模式和窗口记忆。保留原有本地存储和靛蓝珊瑚配色。
+
+1.2.1 新增纯文本复制（Ctrl+Shift+C）、纯文本粘贴（Ctrl+Shift+V）、全文纯文本复制，以及正文右键菜单和工具栏“纯文本”入口。复制保留换行，原记录格式不变；切换记录时重置撤销历史，避免撤销带入另一条记录。
 
 详细说明见 [开发说明](docs/开发说明.md) 和 [使用说明](docs/使用说明.txt)。

@@ -144,6 +144,10 @@ kbd { font: 10px 'Segoe UI', sans-serif; letter-spacing: .1px; white-space: nowr
 .toolbar .icon-button.active { color: #5b56a0; background: #e4dff2; }
 .toolbar > i { height: 16px; width: 1px; background: #ded8e9; margin: 0 5px; }
 .toolbar-spacer { flex: 1; }
+.toolbar-history { display: flex; gap: 2px; margin-left: auto; }
+.plain-text-trigger { display: flex; align-items: center; gap: 5px; height: 31px; padding: 0 8px; color: #6e6590; background: #ede8f5; border-radius: 5px; font-size: 12px; white-space: nowrap; }
+.plain-text-trigger:hover, .plain-text-trigger[aria-expanded="true"] { color: #555092; background: #e3dcf1; }
+.plain-text-trigger:focus-visible { outline: 2px solid #9893c4; outline-offset: 2px; }
 .tiptap { outline: none; min-height: 240px; font-size: 16px; line-height: 1.95; color: #47465a; overflow-wrap: anywhere; }
 .tiptap:focus-visible { outline: none; }
 .tiptap p { margin: 0 0 14px; }
