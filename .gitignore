@@ -1,0 +1,15 @@
+node_modules/
+dist/
+dist-electron/
+/release/
+.local-data/
+test-results/
+*.log
+.npm-cache/
+/.artifacts/
+/.cache/
+/private/
+**/我的数据/
+*.sqlite
+*.sqlite-*
+*.partial

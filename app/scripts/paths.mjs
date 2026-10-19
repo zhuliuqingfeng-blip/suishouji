@@ -1,0 +1,11 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+export const appRoot=fileURLToPath(new URL('../',import.meta.url));
+export const repoRoot=path.resolve(appRoot,'..');
+export const docsRoot=path.join(repoRoot,'docs');
+export const testRoot=path.join(repoRoot,'.artifacts','tests');
+export const stagingRoot=path.join(repoRoot,'.artifacts','staging');
+export const stagedApp=path.join(stagingRoot,'win-unpacked');
+export const installedApp=path.join(repoRoot,'release','随手记');
+export const packagesRoot=path.join(repoRoot,'release','packages');
+export const backupsRoot=path.join(repoRoot,'private','upgrade-backups');

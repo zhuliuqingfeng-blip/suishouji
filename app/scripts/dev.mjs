@@ -1,0 +1,10 @@
+import {appRoot,testRoot,stagingRoot,stagedApp} from './paths.mjs';
+process.chdir(appRoot);
+import { spawn } from 'node:child_process';
+import { createServer } from 'vite';
+import electron from 'electron';
+const compile = spawn(process.execPath, ['node_modules/typescript/bin/tsc','-p','tsconfig.electron.json'], { stdio:'inherit' });
+await new Promise(resolve => compile.on('exit', code => code ? process.exit(code) : resolve()));
+const server = await createServer(); await server.listen();
+const child = spawn(electron, ['.'], { stdio:'inherit', env:{...process.env,VITE_DEV_SERVER_URL:'http://127.0.0.1:5173'} });
+child.on('exit', async code => { await server.close(); process.exit(code ?? 0); });
