@@ -21,6 +21,6 @@ const sourceEntries=sourceFiles.map(p=>({source:path.resolve(p),name:`随手记�
 for(const p of ['README.md','.gitignore'])sourceEntries.push({source:path.join(repoRoot,p),name:`随手记源码/${p}`});
 for(const p of await sources(docsRoot))sourceEntries.push({source:p,name:`随手记源码/docs/${path.relative(docsRoot,p).replaceAll('\\','/')}`});
 await zipFiles(sourceEntries,path.join(packagesRoot,`随手记-${version}-源码.zip`));
-try{await fs.access(installed);console.log('已有软件和数据已保留。新版本暂存在 release/win-unpacked，可使用 scripts/upgrade.mjs 安全升级。');}
+try{await fs.access(installed);console.log('已有软件和数据已保留。新版本暂存在 .artifacts/staging/win-unpacked，可使用 scripts/upgrade.mjs 安全升级。');}
 catch(error){if(error.code!=='ENOENT')throw error;await fs.rename(root,installed);}
 console.log(`已生成 ${packageFile} 和源码包。便携包不会包含个人数据。`);

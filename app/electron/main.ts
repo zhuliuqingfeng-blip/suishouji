@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, protocol, net, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, protocol, net, shell, screen } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Store } from './store.js';
 import { createBackup, validateBackup, applyRestore, recoverInterruptedRestore, exportHtml } from './archive.js';
 import type { Filter, NoteInput } from './shared.js';
+import { fitWindow,readWindowState,writeWindowState } from './window-state.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const testMode = process.env.NOTES_TEST_MODE === '1';
@@ -33,6 +34,16 @@ async function dailyBackup() {
 const methods: Record<string, (...args: any[]) => unknown> = {
   list: (f: Filter) => store.list(f), overview: () => store.overview(), create: () => store.create(), get: (id: string) => store.get(id), save: (input: NoteInput) => store.save(input),
   pin: (id: string, pinned: boolean) => store.pin(id, pinned), trash: (id: string) => store.trash(id), restoreNote: (id: string) => store.restore(id),
+  trashMany: async (ids:string[])=>{
+    const unique=store.validateBatch(ids,false);
+    if(unique.length>1){const answer=await dialog.showMessageBox(win!,{type:'question',title:'删除所选记录',message:`将 ${unique.length} 条记录移到回收站？`,detail:'删除后可立即撤销，也可从回收站恢复。',buttons:['取消','移到回收站'],defaultId:0,cancelId:0});if(answer.response!==1)return {succeeded:[],failed:[],cancelled:true};}
+    return store.trashMany(unique);
+  },
+  restoreMany:(ids:string[])=>store.restoreMany(ids),undoDelete:(token:string)=>store.undoDelete(token),
+  removeMany:async(ids:string[])=>{
+    const unique=store.validateBatch(ids,true);const answer=await dialog.showMessageBox(win!,{type:'warning',title:'永久删除所选记录',message:`永久删除 ${unique.length} 条记录及其附件？`,detail:'此操作无法撤销。',buttons:['取消','永久删除'],defaultId:0,cancelId:0});
+    return answer.response===1?store.removeMany(unique):{succeeded:[],failed:[],cancelled:true};
+  },
   remove: async (id: string) => {
     const answer = await dialog.showMessageBox(win!, { type: 'warning', title: '永久删除', message: '永久删除这条记录和它的附件？', detail: '此操作无法在回收站中撤销。', buttons: ['取消', '永久删除'], defaultId: 0, cancelId: 0 });
     if (answer.response === 1) store.remove(id);
@@ -103,10 +114,17 @@ async function start() {
       return { ok: true, data: await methods[method](...args) };
     } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) }; }
   });
-  win = new BrowserWindow({ width: 1260, height: 850, minWidth: 920, minHeight: 650, title: '随手记', backgroundColor: '#f6f4f1', autoHideMenuBar: true, show: false,
+  const preferences=path.join(app.getPath('userData'),'window-state.json');
+  const state=fitWindow(readWindowState(preferences),screen.getAllDisplays().map(d=>d.workArea));
+  const area=screen.getDisplayMatching(state).workArea;
+  win = new BrowserWindow({ ...state, minWidth: Math.min(920,area.width), minHeight: Math.min(650,area.height), title: '随手记', backgroundColor: '#f6f4f1', autoHideMenuBar: true, show: false,
     icon: path.join(here, '../assets/icon.ico'),
     webPreferences: { preload: path.join(here, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false } });
   win.setMenu(null);
+  let windowTimer:ReturnType<typeof setTimeout>|undefined;
+  const remember=()=>{if(win&&!win.isDestroyed())writeWindowState(preferences,{...win.getNormalBounds(),maximized:win.isMaximized()});};
+  const schedule=()=>{if(windowTimer)clearTimeout(windowTimer);windowTimer=setTimeout(remember,300);};
+  win.on('resize',schedule);win.on('move',schedule);win.on('maximize',schedule);win.on('unmaximize',schedule);win.on('close',remember);
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (event) => event.preventDefault());
   win.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
@@ -115,7 +133,12 @@ async function start() {
     callback({ cancel: /^https?:/i.test(details.url) && !localDev });
   });
   win.on('close', event => { if (!mayClose) { event.preventDefault(); if (busy) dialog.showMessageBox(win!, { message: '正在备份或恢复，请完成后再关闭。', buttons: ['知道了'] }); else win?.webContents.send('notes:close'); } });
-  win.once('ready-to-show', () => { win?.show(); });
+  win.once('ready-to-show', () => {
+    // Apply bounds after Windows has created its DPI-scaled frame; constructor
+    // dimensions can otherwise grow by a few pixels on every restart.
+    win?.setBounds({x:state.x,y:state.y,width:state.width,height:state.height});
+    if(state.maximized)win?.maximize();win?.show();
+  });
   if (!app.isPackaged && process.env.VITE_DEV_SERVER_URL) await win.loadURL(process.env.VITE_DEV_SERVER_URL); else await win.loadFile(path.join(here, '../dist/index.html'));
   // If the UI cannot start, provide a native exit path instead of trapping the window.
   win.webContents.on('render-process-gone', () => { mayClose = true; dialog.showErrorBox('界面异常', '界面意外关闭。已保存的数据仍在本地，请重新打开随手记。'); win?.close(); });

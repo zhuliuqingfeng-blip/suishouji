@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-export const appRoot=fileURLToPath(new URL('../',import.meta.url));
+export const appRoot=path.resolve(fileURLToPath(new URL('../',import.meta.url)));
 export const repoRoot=path.resolve(appRoot,'..');
 export const docsRoot=path.join(repoRoot,'docs');
 export const testRoot=path.join(repoRoot,'.artifacts','tests');

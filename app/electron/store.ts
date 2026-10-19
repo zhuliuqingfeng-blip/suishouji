@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { randomUUID, createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { Attachment, Filter, Note, NoteDetail, NoteInput, NoteSummary, Overview, RichNode } from './shared.js';
+import type { Attachment, BatchResult, Filter, Note, NoteDetail, NoteInput, NoteSummary, Overview, RichNode } from './shared.js';
 
 export const EMPTY_DOC: RichNode = { type: 'doc', content: [{ type: 'paragraph' }] };
 export const imageMime: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.bmp': 'image/bmp' };
@@ -40,6 +40,8 @@ export function normalizeDocument(doc: RichNode, assets: Set<string>): RichNode 
 
 export class Store {
   db: DatabaseSync;
+  private deletionClock = 0;
+  private undoBatches = new Map<string, { ids: string[]; timestamp: string; expiresAt: number }>();
   readonly databasePath: string;
   constructor(readonly root: string) {
     fs.mkdirSync(path.join(root, 'attachments'), { recursive: true });
@@ -56,6 +58,7 @@ export class Store {
       CREATE INDEX IF NOT EXISTS attachment_note ON attachments(noteId);
       PRAGMA user_version=1;`);
     if ((this.db.prepare('PRAGMA quick_check').get() as Record<string, string>).quick_check !== 'ok') throw new Error('数据检查未通过，请从备份恢复，原数据已保留');
+    this.recoverDeletions();
   }
   close() { this.db.close(); }
   private decode(row: Record<string, unknown>): Note {
@@ -73,7 +76,8 @@ export class Store {
       WHERE deletedAt IS ${filter.trash ? 'NOT ' : ''}NULL ORDER BY pinned DESC, updatedAt DESC`).all();
     return rows.map(row => { const { document: _, ...note } = this.decode(row); return { ...note, attachmentCount: Number(row.attachmentCount) }; })
       .filter(n => !filter.tag || n.tags.includes(filter.tag))
-      .filter(n => !query || `${n.title}\n${n.plainText}\n${n.tags.join(' ')}\n${this.db.prepare('SELECT name FROM attachments WHERE noteId=?').all(n.id).map(a => a.name).join('\n')}`.toLocaleLowerCase().includes(query));
+      .filter(n => !query || `${n.title}\n${n.plainText}\n${n.tags.join(' ')}\n${this.db.prepare('SELECT name FROM attachments WHERE noteId=?').all(n.id).map(a => a.name).join('\n')}`.toLocaleLowerCase().includes(query))
+      .sort((a,b) => Number(b.pinned)-Number(a.pinned) || (filter.sort === 'title' ? displayTitle(a).localeCompare(displayTitle(b),'zh-CN') : filter.sort === 'created' ? b.createdAt.localeCompare(a.createdAt) : b.updatedAt.localeCompare(a.updatedAt)) || a.id.localeCompare(b.id));
   }
   overview(): Overview {
     const rows = this.list(); const tags = new Map<string, number>();
@@ -96,12 +100,61 @@ export class Store {
     return this.get(input.id).note;
   }
   pin(id: string, pinned: boolean) { this.get(id); this.db.prepare('UPDATE notes SET pinned=? WHERE id=?').run(pinned ? 1 : 0, id); }
-  trash(id: string) { this.get(id); this.db.prepare('UPDATE notes SET deletedAt=? WHERE id=?').run(new Date().toISOString(), id); }
+  trash(id: string) { this.trashMany([id]); }
   restore(id: string) { this.get(id); this.db.prepare('UPDATE notes SET deletedAt=NULL WHERE id=?').run(id); }
-  remove(id: string) {
-    const detail = this.get(id); if (!detail.note.deletedAt) throw new Error('只有回收站中的记录可以永久删除');
-    this.db.prepare('DELETE FROM notes WHERE id=?').run(id);
-    for (const a of detail.attachments) fs.rmSync(this.assetPath(a), { force: true });
+  validateBatch(ids: string[], deleted: boolean): string[] {
+    if (!Array.isArray(ids) || !ids.length) throw new Error('请先选择记录');
+    const unique = [...new Set(ids)];
+    for (const id of unique) { const {note}=this.get(id); if (!!note.deletedAt !== deleted) throw new Error('记录状态已变化，请刷新列表后重试'); }
+    return unique;
+  }
+  private transaction<T>(action: () => T): T {
+    this.db.exec('BEGIN'); try { const result=action(); this.db.exec('COMMIT'); return result; } catch(error) { this.db.exec('ROLLBACK'); throw error; }
+  }
+  trashMany(ids: string[]): BatchResult {
+    const unique=this.validateBatch(ids,false); this.deletionClock=Math.max(Date.now(),this.deletionClock+1);
+    const timestamp=new Date(this.deletionClock).toISOString();
+    this.transaction(()=>{const stmt=this.db.prepare('UPDATE notes SET deletedAt=? WHERE id=?'); for(const id of unique)stmt.run(timestamp,id);});
+    for(const [key,value] of this.undoBatches)if(value.expiresAt<Date.now())this.undoBatches.delete(key);
+    const token=randomUUID(),expiresAt=Date.now()+10000;this.undoBatches.set(token,{ids:unique,timestamp,expiresAt});
+    return {succeeded:unique,failed:[],undo:{token,expiresAt}};
+  }
+  restoreMany(ids: string[]): BatchResult {
+    const unique=this.validateBatch(ids,true);this.transaction(()=>{const stmt=this.db.prepare('UPDATE notes SET deletedAt=NULL WHERE id=?');for(const id of unique)stmt.run(id);});
+    return {succeeded:unique,failed:[]};
+  }
+  undoDelete(token: string): BatchResult {
+    const batch=this.undoBatches.get(token);this.undoBatches.delete(token);
+    if(!batch||batch.expiresAt<Date.now())throw new Error('撤销时间已过，仍可在回收站中恢复记录');
+    const succeeded:string[]=[];this.transaction(()=>{const stmt=this.db.prepare('UPDATE notes SET deletedAt=NULL WHERE id=? AND deletedAt=?');for(const id of batch.ids)if(stmt.run(id,batch.timestamp).changes)succeeded.push(id);});
+    return {succeeded,failed:[]};
+  }
+  remove(id: string) { this.removeOne(id); }
+  private removeOne(id: string): string | undefined {
+    const detail=this.get(id);if(!detail.note.deletedAt)throw new Error('只有回收站中的记录可以永久删除');
+    const stage=path.join(this.root,'.delete-pending',id);fs.mkdirSync(stage,{recursive:true});
+    const moved:{source:string;target:string}[]=[];
+    try {
+      for(const a of detail.attachments){const source=this.assetPath(a);if(!fs.existsSync(source))continue;const target=path.join(stage,path.basename(source));fs.renameSync(source,target);moved.push({source,target});}
+      this.transaction(()=>this.db.prepare('DELETE FROM notes WHERE id=?').run(id));
+    }catch(error){for(const file of moved.reverse())fs.renameSync(file.target,file.source);fs.rmSync(stage,{recursive:true,force:true});throw error;}
+    try{fs.rmSync(stage,{recursive:true,force:true});}catch{return '记录已删除，部分临时附件占用空间将在下次启动时清理';}
+  }
+  removeMany(ids: string[]): BatchResult {
+    const unique=this.validateBatch(ids,true),result:BatchResult={succeeded:[],failed:[],warnings:[]};
+    for(const id of unique)try{const warning=this.removeOne(id);result.succeeded.push(id);if(warning)result.warnings!.push(warning);}catch(error){result.failed.push({id,error:error instanceof Error?error.message:String(error)});}
+    return result;
+  }
+  private recoverDeletions() {
+    const root=path.join(this.root,'.delete-pending');if(!fs.existsSync(root))return;
+    for(const id of fs.readdirSync(root)){
+      if(!/^[a-f\d-]{36}$/.test(id))continue;
+      const stage=path.join(root,id);if(!fs.statSync(stage).isDirectory())continue;
+      if(this.db.prepare('SELECT id FROM notes WHERE id=?').get(id)){
+        for(const a of this.get(id).attachments){const source=path.join(stage,path.basename(a.relativePath)),target=this.assetPath(a);if(fs.existsSync(source)&&!fs.existsSync(target))fs.renameSync(source,target);}
+      }
+      try{fs.rmSync(stage,{recursive:true,force:true});}catch{/* Retry committed file cleanup at next startup. */}
+    }
   }
   attachment(id: string): Attachment {
     assertId(id); const row = this.db.prepare('SELECT * FROM attachments WHERE id=?').get(id);

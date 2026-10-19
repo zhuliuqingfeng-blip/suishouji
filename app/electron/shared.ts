@@ -7,7 +7,9 @@ export interface Note {
 export interface NoteInput { id: string; title: string; document: RichNode; tags: string[] }
 export interface NoteSummary extends Omit<Note, 'document'> { attachmentCount: number }
 export interface NoteDetail { note: Note; attachments: Attachment[] }
-export interface Filter { query?: string; tag?: string; trash?: boolean }
+export type SortOrder = 'updated' | 'created' | 'title';
+export interface Filter { query?: string; tag?: string; trash?: boolean; sort?: SortOrder }
+export interface BatchResult { succeeded: string[]; failed: { id: string; error: string }[]; cancelled?: boolean; warnings?: string[]; undo?: { token: string; expiresAt: number } }
 export interface Overview { active: number; trash: number; tags: { name: string; count: number }[] }
 export interface AppInfo { dataDir: string; version: string; lastBackup: string | null; backupWarning: string | null }
 export type Result<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -16,6 +18,8 @@ export interface NotesAPI {
   create(): Promise<NoteDetail>; get(id: string): Promise<NoteDetail>; save(input: NoteInput): Promise<Note>;
   pin(id: string, pinned: boolean): Promise<void>; trash(id: string): Promise<void>; restoreNote(id: string): Promise<void>;
   remove(id: string): Promise<void>; emptyTrash(): Promise<void>;
+  trashMany(ids: string[]): Promise<BatchResult>; restoreMany(ids: string[]): Promise<BatchResult>;
+  removeMany(ids: string[]): Promise<BatchResult>; undoDelete(token: string): Promise<BatchResult>;
   pickFiles(noteId: string): Promise<Attachment[]>;
   importPaths(noteId: string, paths: string[]): Promise<Attachment[]>;
   pasteImage(noteId: string, bytes: Uint8Array, mime: string): Promise<Attachment>;
