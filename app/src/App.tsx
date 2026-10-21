@@ -4,10 +4,10 @@ import { EditorState } from '@tiptap/pm/state';
 import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
 import Placeholder from '@tiptap/extension-placeholder';
-import { Plus, Search, FolderOpen, Trash2, Pin, Settings2, ChevronDown, MoreHorizontal, ArrowUpRight, ArrowLeft, ArrowRight, SlidersHorizontal, PanelLeft, Paperclip, ImagePlus, Bold, Italic, Heading2, List, ListOrdered, Link, Undo2, Redo2, X, Check, CircleAlert, RotateCcw, Download, Upload, FileText, ArchiveRestore, HardDrive, LoaderCircle, BookOpen, Maximize2, Focus, CheckSquare, ClipboardType, Copy } from 'lucide-react';
+import { Plus, Search, FolderOpen, Trash2, Pin, Settings2, ChevronDown, MoreHorizontal, ArrowUpRight, ArrowLeft, ArrowRight, SlidersHorizontal, PanelLeft, PanelTopClose, PanelTopOpen, Paperclip, ImagePlus, Bold, Italic, Heading2, List, ListOrdered, Link, Undo2, Redo2, X, Check, CircleAlert, RotateCcw, Download, Upload, FileText, ArchiveRestore, HardDrive, LoaderCircle, BookOpen, Maximize2, Focus, CheckSquare, ClipboardType, Copy } from 'lucide-react';
 import appMark from '../assets/icon.svg';
 import type { AppInfo, Attachment, Filter, Note, NoteDetail, NoteSummary, Overview, RichNode,SortOrder,TextMenuAction } from '../electron/shared';
-import {usePanels,Splitter,rangeSelection} from './layout';
+import {usePanels,Splitter,LibraryHeightSplitter,LIBRARY_HEADER,rangeSelection} from './layout';
 import {insertPlainText,notePlainText,plainText} from './plain-text';
 
 const LocalImage = Image.extend({
@@ -37,6 +37,7 @@ export default function App() {
   const textMenuRef = useRef<(mode:'context'|'toolbar',x:number,y:number) => void>(() => {});
   const {preferences:layout,setPreferences:setLayout,sizes,style:layoutStyle}=usePanels();
   const focusEditor=useRef(false);
+  const libraryHeading=useRef<HTMLDivElement>(null);
   const [sort,setSort]=useState<SortOrder>(()=>{const s=localStorage.getItem('suishouji:sort');return s==='title'||s==='created'?s:'updated';});
   const [selecting,setSelecting]=useState(false),[checked,setChecked]=useState<Set<string>>(new Set());
   const anchor=useRef<string|null>(null),listArea=useRef<HTMLDivElement>(null),searchPending=useRef(false);
@@ -300,12 +301,13 @@ export default function App() {
 
   const note = detail?.note, files = detail?.attachments.filter(a => a.kind === 'file') ?? [];
   const inLibrary=layout.view==='library',indexVisible=inLibrary||(!layout.indexHidden&&!layout.focused);
+  const compactLibrary=layout.libraryHeaderHeight<=LIBRARY_HEADER.compactBelow;
   const saveStatus=<div className={`save-state ${status}`} role="status" aria-live="polite">
     {operation||importing||status==='saving'?<LoaderCircle size={13} className="spin"/>:status==='error'?<CircleAlert size={13}/>:<Check size={13}/>}
     <span>{operation?'正在处理数据…':importing?'正在保存附件…':status==='saved'?'所有更改已保存':status==='dirty'?'等待保存…':status==='saving'?'正在保存…':'保存失败'}</span>
     {status==='error'&&<button onClick={()=>void flush()}>重试保存</button>}
   </div>;
-  return <div className={`app-shell ${inLibrary?'library-mode':'document-mode'} ${layout.focused?'is-focused':''} ${layout.filtersCollapsed?'filters-collapsed':''}`} style={layoutStyle} onClick={()=>{if(menu)setMenu(false);if(noteMenu)setNoteMenu(false);if(context)setContext(null);}}>
+  return <div className={`app-shell ${inLibrary?'library-mode':'document-mode'} ${layout.focused?'is-focused':''} ${layout.filtersCollapsed?'filters-collapsed':''} ${compactLibrary?'library-compact':''}`} style={layoutStyle} onClick={()=>{if(menu)setMenu(false);if(noteMenu)setNoteMenu(false);if(context)setContext(null);}}>
     <header className="app-navigation" aria-label="主导航">
       <button className="app-brand" aria-label="返回手记库" disabled={blocked} onClick={()=>void openLibrary()}><img src={appMark} alt=""/><strong>随手记</strong><span>本地手记</span></button>
       <nav className="space-tabs" aria-label="记录空间">
@@ -328,18 +330,19 @@ export default function App() {
     </header>
     <div className="workbench">
       <section className="notes-panel" aria-label={inLibrary?'手记库':'记录目录'} hidden={!indexVisible}>
-        <div className="collection-heading">
-          <div><div className="section-overline">{trash?'已删除的记录':'文字 · 图片 · 文件'}</div><h1>{trash?'回收站':tag?tag:'手记库'}<span>{list.length} 条记录</span></h1><p>{trash?'留在这里，仍然可以找回。':'把值得留下的，放在一起。'}</p></div>
+        <div className="collection-heading" ref={libraryHeading}>
+          <div><div className="section-overline">{trash?'已删除的记录':'文字 · 图片 · 文件'}</div><h1 title={tag||undefined}>{trash?'回收站':tag?tag:'手记库'}<span>{list.length} 条记录</span></h1><p>{trash?'留在这里，仍然可以找回。':'把值得留下的，放在一起。'}</p></div>
           {!inLibrary&&<div className="index-heading-actions"><IconButton title="展开手记库" onClick={()=>void openLibrary()}><Maximize2 size={16}/></IconButton><IconButton title="关闭记录目录" onClick={()=>setLayout(p=>({...p,indexHidden:true}))}><X size={17}/></IconButton></div>}
           {inLibrary&&note&&<button className="resume-note" disabled={blocked} onClick={()=>void openNote(note.id)}><span>继续上次的记录</span><strong>{titleFor(note)}</strong><ArrowUpRight size={18}/></button>}
         </div>
         <div className="collection-tools">
           <div className="search-box"><Search size={17}/><input ref={searchInput} aria-label="搜索记录" placeholder="查找标题、正文或文件…" value={query} disabled={blocked} onChange={e=>setQuery(e.target.value)}/>{query?<button aria-label="清除搜索" onClick={()=>setQuery('')}><X size={15}/></button>:<kbd>Ctrl F</kbd>}</div>
-          <div className="index-options"><select aria-label="记录排序" value={sort} disabled={blocked} onChange={e=>setSort(e.target.value as SortOrder)}><option value="updated">最近修改</option><option value="created">最近创建</option><option value="title">标题排序</option></select><button className="filter-toggle" aria-label={layout.filtersCollapsed?'展开标签筛选':'收起标签筛选'} aria-expanded={!layout.filtersCollapsed} onClick={()=>setLayout(p=>({...p,filtersCollapsed:!p.filtersCollapsed}))}><SlidersHorizontal size={15}/><span>筛选</span></button><button className="multi-toggle" aria-pressed={selecting} disabled={blocked||listPending||!list.length} onClick={()=>{if(selecting)clearSelection();else setSelecting(true);}}><CheckSquare size={15}/>{selecting?'退出多选':'多选'}</button></div>
+          <div className="index-options"><select aria-label="记录排序" value={sort} disabled={blocked} onChange={e=>setSort(e.target.value as SortOrder)}><option value="updated">最近修改</option><option value="created">最近创建</option><option value="title">标题排序</option></select>{inLibrary&&<button className="header-toggle" aria-pressed={compactLibrary} title={compactLibrary?'恢复顶部标题和常规行距':'缩小顶部标题和记录行距，显示更多记录'} onClick={()=>setLayout(p=>({...p,libraryHeaderHeight:compactLibrary?LIBRARY_HEADER.default:LIBRARY_HEADER.min}))}>{compactLibrary?<PanelTopOpen size={15}/>:<PanelTopClose size={15}/>}<span>{compactLibrary?'舒展视图':'紧凑视图'}</span></button>}<button className="filter-toggle" aria-label={layout.filtersCollapsed?'展开标签筛选':'收起标签筛选'} aria-expanded={!layout.filtersCollapsed} onClick={()=>setLayout(p=>({...p,filtersCollapsed:!p.filtersCollapsed}))}><SlidersHorizontal size={15}/><span>筛选</span></button><button className="multi-toggle" aria-pressed={selecting} disabled={blocked||listPending||!list.length} onClick={()=>{if(selecting)clearSelection();else setSelecting(true);}}><CheckSquare size={15}/>{selecting?'退出多选':'多选'}</button></div>
         </div>
         <div className="collection-filters" hidden={layout.filtersCollapsed} aria-label="标签筛选"><span>标签</span><button disabled={blocked} className={!tag?'chosen':''} onClick={()=>void changeView(trash)}>全部</button>{overview.tags.map(t=><button disabled={blocked} key={t.name} className={tag===t.name?'chosen':''} onClick={()=>void changeView(false,t.name)}>{t.name}<small>{t.count}</small></button>)}{!overview.tags.length&&<span className="filter-empty">在记录中添加标签，即可在这里筛选</span>}</div>
         {selecting?<div className="selection-bar" aria-label="批量操作"><strong>已选 {checked.size} 条</strong><button disabled={blocked||listPending} onClick={()=>{setChecked(new Set(list.map(n=>n.id)));anchor.current=list[0]?.id??null;}}>全选当前结果</button><button disabled={blocked} onClick={clearSelection}>取消选择</button><div>{trash&&<button disabled={blocked||listPending||!checked.size} onClick={()=>void batchAction('restore',[...checked])}><RotateCcw size={14}/>恢复所选</button>}<button className="danger" disabled={blocked||listPending||!checked.size} onClick={()=>void batchAction(trash?'remove':'delete',[...checked])}><Trash2 size={14}/>{trash?'永久删除所选':'删除所选'}</button></div></div>:trash&&overview.trash>0?<div className="trash-list-actions"><span>恢复后可继续编辑</span><button disabled={blocked} onClick={()=>void act(async()=>{await api.emptyTrash();if(!(await api.overview()).trash)setUndo(null);},undefined,true)}>清空回收站</button></div>:null}
         <div className="index-columns" aria-hidden="true"><span>序</span><span>记录</span><span>标签</span><span>附件</span><span>{sort==='created'?'创建时间':'修改时间'}</span><span/></div>
+        {inLibrary&&<LibraryHeightSplitter heading={libraryHeading} list={listArea} onChange={libraryHeaderHeight=>setLayout(p=>({...p,libraryHeaderHeight}))}/>}
         <div className="note-list" ref={listArea} tabIndex={0} aria-label="记录列表" aria-busy={listPending} onKeyDown={e=>{
           if(e.nativeEvent.isComposing||(e.target as HTMLElement).closest('input:not([type=checkbox]),textarea,[contenteditable=true]'))return;
           if(blocked||listPending){if(e.key==='Delete'||(e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='a'){e.preventDefault();e.stopPropagation();}return;}
@@ -407,6 +410,7 @@ export default function App() {
       <p>列表上方点击“多选”，或按住 Ctrl 点击记录。Shift 点击连续选择；全选只选中当前筛选结果。在列表中按 Delete 可以删除所选记录，输入文字时仍按正常文字编辑处理。</p>
       <p>移入回收站后，右下角有 10 秒“撤销”。回收站可批量恢复或永久删除；右键记录也有常用操作。</p>
       <p>顶部“手记库”和“回收站”用于切换记录空间。手记库按行展示记录，点击一行进入书写页；左上角“手记库”可返回完整索引。标签筛选、排序和多选位于索引上方。</p>
+      <p>手记库表头下方的分隔线可上下拖动，向上压缩标题区即可看到更多记录；双击恢复默认，也可用上下方向键调整。“紧凑视图”一次缩小标题区及行距，点击“舒展视图”还原。搜索、筛选和表头保持可用，选择会自动记住。</p>
       <p>书写页上方的目录按钮可打开记录目录；拖动目录右边的分隔线调整宽度，双击恢复默认。专注模式隐藏顶部导航和目录，再次点击恢复。Ctrl+F 自动打开目录并聚焦搜索。场景、目录宽度、筛选收起状态、排序和窗口大小都会记住。</p>
       <p>再次打开会回到上次查看的记录。连续点击新建时，会继续使用当前的空白记录。</p>
       <p>关闭窗口就会退出软件。换电脑前，先关闭软件，再复制<strong>整个软件文件夹</strong>，包含里面的“我的数据”。</p>

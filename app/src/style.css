@@ -1786,3 +1786,116 @@ kbd {
     animation-duration:2s
   }
 }
+
+/* The line below the column labels resizes the library intro, leaving tools usable. */
+.library-mode .collection-heading {
+  flex:0 1 var(--library-header-height,166px);
+  min-height:56px;
+  max-height:240px;
+  padding-block:0;
+  overflow:hidden;
+  container:library-intro / size;
+}
+.library-mode .collection-heading h1 {
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.library-mode .collection-tools {
+  flex-shrink:0;
+}
+.library-mode .note-list {
+  min-height:160px;
+}
+.library-mode .index-columns {
+  border-bottom:0;
+  padding-bottom:7px;
+}
+.header-toggle {
+  display:flex;
+  align-items:center;
+  gap:6px;
+  background:none;
+  padding:7px 0;
+  color:#6d627c;
+  font-size:11px;
+  white-space:nowrap;
+}
+.header-toggle:hover,.header-toggle[aria-pressed=true] {
+  color:#51426d;
+  text-decoration:underline;
+  text-underline-offset:5px;
+}
+.library-height-splitter {
+  flex:0 0 10px;
+  height:10px;
+  margin:0 54px;
+  cursor:row-resize;
+  background:transparent;
+  grid-column:auto;
+  grid-row:auto;
+}
+.library-height-splitter:before {
+  top:4px;
+  bottom:auto;
+  left:0;
+  right:0;
+  width:auto;
+  height:1px;
+  background:#c8c0d2;
+}
+.library-height-splitter:after {
+  content:'';
+  position:absolute;
+  width:32px;
+  height:4px;
+  left:calc(50% - 16px);
+  top:3px;
+  border-radius:3px;
+  background:#b5a7c5;
+}
+.library-height-splitter:hover,.library-height-splitter.dragging {
+  background:#e9e2f0;
+}
+.library-height-splitter:hover:after,.library-height-splitter.dragging:after {
+  background:#8e78a9;
+}
+.app-shell:has(.library-height-splitter.dragging) {
+  cursor:row-resize;
+}
+.library-mode.library-compact .index-entry {
+  min-height:61px;
+  padding-block:10px;
+}
+.library-mode.library-compact .entry-content>strong {
+  font-size:14px;
+  line-height:1.5;
+}
+.library-mode.library-compact .entry-content>span {
+  line-height:1.6;
+  margin-top:3px;
+}
+.library-mode.library-compact .note-checkbox {
+  top:23px;
+}
+@container library-intro (max-height:110px) {
+  .collection-heading .section-overline,.collection-heading p,.resume-note>span {
+    display:none;
+  }
+  .collection-heading h1 {
+    font-size:22px;
+    line-height:1.4;
+    margin:0;
+  }
+  .collection-heading h1>span {
+    margin-left:14px;
+  }
+  .resume-note {
+    padding-block:7px;
+  }
+}
+@media(max-width:1050px) {
+  .library-height-splitter {
+    margin-inline:36px;
+  }
+}

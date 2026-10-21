@@ -7,6 +7,7 @@ test('手记库使用整页，书写目录可收起和专注，窄窗口保留�
  assert.ok(904-actual.index-actual.handle>=400);assert.equal(p.indexWidth,520);
  assert.equal(fitPanels({...p,view:'library'},1260).index,0);assert.equal(fitPanels({...p,indexHidden:true},1260).index,0);
  assert.deepEqual(fitPanels({...p,focused:true},1260),{index:0,handle:0});assert.equal(normalizeLayout({indexWidth:999}).indexWidth,520);
+ assert.equal(normalizeLayout({indexWidth:400}).libraryHeaderHeight,166);assert.equal(normalizeLayout({libraryHeaderHeight:0}).libraryHeaderHeight,56);assert.equal(normalizeLayout({libraryHeaderHeight:Infinity}).libraryHeaderHeight,166);
 });
 test('连续多选按当前顺序添加，普通选择可取消且不会重复',()=>{
  const range=rangeSelection(['a','b','c','d'],new Set(['a']),'c','a',true);assert.deepEqual([...range],['a','b','c']);
