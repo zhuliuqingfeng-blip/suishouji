@@ -1,6 +1,6 @@
 {
   "name": "suishouji",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "private": true,
   "description": "完全保存在本地的个人图文随手记",
   "author": "Local Notes",
@@ -19,7 +19,8 @@
     "test:ux": "node scripts/ux-test.mjs",
     "test:dev": "node scripts/dev-smoke.mjs",
     "test:portable": "node scripts/portable-smoke.mjs",
-    "test:clipboard": "node scripts/clipboard-test.mjs"
+    "test:clipboard": "node scripts/clipboard-test.mjs",
+    "test:design": "node scripts/design-test.mjs"
   },
   "build": {
     "appId": "local.suishouji.desktop",

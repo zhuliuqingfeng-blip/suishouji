@@ -23,15 +23,18 @@ try{
  await page.keyboard.press('Control+f');assert.equal(await page.getByLabel('搜索记录').evaluate(n=>n===document.activeElement),true);
  await page.getByLabel('搜索记录').fill('不存在');await page.keyboard.press('Escape');assert.equal(await page.getByLabel('搜索记录').inputValue(),'');
  const caption=await page.getByRole('textbox',{name:'记录正文'}).evaluate(n=>parseFloat(getComputedStyle(n).fontSize));assert.ok(caption>=16);
- const primary=await page.locator('.brand-icon').first().evaluate(n=>getComputedStyle(n).backgroundImage);assert.match(primary,/80, 86, 151/);
+ const navContrast=await page.locator('.sidebar').evaluate(n=>{
+   const luminance=color=>{const rgb=color.match(/[\d.]+/g).slice(0,3).map(Number).map(c=>{const v=c/255;return v<=.04045?v/12.92:((v+.055)/1.055)**2.4;});return rgb[0]*.2126+rgb[1]*.7152+rgb[2]*.0722;};
+   const style=getComputedStyle(n),a=luminance(style.color),b=luminance(style.backgroundColor);return (Math.max(a,b)+.05)/(Math.min(a,b)+.05);
+ });assert.ok(navContrast>=4.5,'导航文字与背景应有清晰对比');
  assert.equal(await page.getByRole('button',{name:'添加图片或文件',exact:true}).isVisible(),true);
  await page.getByLabel('记录标题').focus();await page.evaluate(()=>document.querySelector('.editor-scroll').scrollTop=0);await page.waitForTimeout(150);
  await page.screenshot({path:path.resolve(testRoot,'新版-记录界面.png')});
- await page.keyboard.press('Control+n');await page.getByLabel('记录标题').fill('下次打开，从这里继续');
+ await page.keyboard.press('Control+n');await until(async()=>await page.getByLabel('记录标题').isEnabled()&&await page.getByLabel('记录标题').inputValue()==='');await page.getByLabel('记录标题').fill('下次打开，从这里继续');
  await page.getByRole('textbox',{name:'记录正文'}).fill('这条记录没有置顶，用于验证打开位置。');
  await page.keyboard.press('Control+s');await until(()=>page.evaluate(async()=> (await window.notes.list({})).some(n=>n.title==='下次打开，从这里继续')));
  await page.getByRole('button',{name:'插入网页链接',exact:true}).click();await page.getByRole('dialog',{name:'插入网页链接',exact:true}).waitFor();await page.keyboard.press('Escape');assert.equal(await page.getByRole('dialog').count(),0);
  const closed=instance.waitForEvent('close');await instance.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].close());await closed;instance=null;
  await launch();await until(async()=>await page.getByLabel('记录标题').inputValue()==='下次打开，从这里继续');
- console.log(JSON.stringify({passed:true,version:await page.evaluate(async()=>(await window.notes.info()).version),checks:['靛蓝珊瑚配色','正文字号16px','Ctrl+N新建','空白记录复用','Ctrl+F搜索','Esc清空搜索','顶部图片文件入口','记住上次未置顶记录','Esc关闭链接对话框']},null,2));
+ console.log(JSON.stringify({passed:true,version:await page.evaluate(async()=>(await window.notes.info()).version),checks:['导航文字对比度','正文字号16px','Ctrl+N新建','空白记录复用','Ctrl+F搜索','Esc清空搜索','顶部图片文件入口','记住上次未置顶记录','Esc关闭链接对话框']},null,2));
 }catch(error){if(page)await page.screenshot({path:path.resolve(testRoot,'ux-failure.png')}).catch(()=>{});throw error;}finally{if(instance)await instance.close();}

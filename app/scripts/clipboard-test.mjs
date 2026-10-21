@@ -7,7 +7,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 const root=path.join(testRoot,'clipboard-'+Date.now()); await fs.mkdir(root,{recursive:true});
-let instance,page,passed=false;
+let instance,page,passed=false,diagnostics='';
 const errors=[],checks=[];
 async function until(fn){for(let i=0;i<160;i++){if(await fn())return;await new Promise(r=>setTimeout(r,50));}throw new Error('剪贴板验收等待超时');}
 async function writeClipboard(text,html){await instance.evaluate(async({clipboard,ClipboardItem},{text,html})=>{
@@ -34,6 +34,7 @@ async function getDoc(){await page.keyboard.press('Control+s');await until(()=>p
 async function menuAction(label){await instance.evaluate((_electron,label)=>{globalThis.__nextMenuAction=label;},label);}
 try{
   instance=await electron.launch({executablePath:process.env.NOTES_PACKAGED_EXE||electronPath,args:process.env.NOTES_PACKAGED_EXE?[]:['.'],env:{...process.env,NOTES_TEST_MODE:'1',NOTES_DATA_DIR:path.join(root,'我的数据')}});
+  instance.process().stderr?.on('data',chunk=>{diagnostics=(diagnostics+chunk).slice(-4000);});
   // Save the user's OS clipboard eagerly and restore it after all checks.
   await instance.evaluate(async({clipboard,ClipboardItem,Menu})=>{
     globalThis.__previousClipboard=await Promise.all((await clipboard.read()).map(async item=>new ClipboardItem(Object.fromEntries(await Promise.all(item.types.map(async type=>[type,await item.getType(type)]))))));
@@ -138,7 +139,7 @@ try{
   assert.deepEqual(errors,[]);
   passed=true;
   console.log(JSON.stringify({passed:true,version:(await page.evaluate(()=>window.notes.info())).version,checks,screenshots:root},null,2));
-}catch(error){if(page){await page.screenshot({path:path.join(root,'failure.png')}).catch(()=>{});console.error((await page.locator('body').innerText()).slice(-2200));}throw error;}
+}catch(error){console.error({completedChecks:checks,diagnostics});if(page&&!page.isClosed()){await page.screenshot({path:path.join(root,'failure.png')}).catch(()=>{});console.error((await page.locator('body').innerText().catch(()=>'' )).slice(-2200));}throw error;}
 finally{
   if(instance){await instance.evaluate(async({clipboard})=>{if(globalThis.__previousClipboard?.length)await clipboard.write(globalThis.__previousClipboard);else clipboard.clear();}).catch(()=>{});if(passed)await instance.close();else await instance.evaluate(({app})=>app.exit(0)).catch(()=>{});}
 }

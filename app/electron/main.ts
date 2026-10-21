@@ -144,7 +144,7 @@ async function start() {
   const preferences=path.join(app.getPath('userData'),'window-state.json');
   const state=fitWindow(readWindowState(preferences),screen.getAllDisplays().map(d=>d.workArea));
   const area=screen.getDisplayMatching(state).workArea;
-  win = new BrowserWindow({ ...state, minWidth: Math.min(920,area.width), minHeight: Math.min(650,area.height), title: '随手记', backgroundColor: '#f6f4f1', autoHideMenuBar: true, show: false,
+  win = new BrowserWindow({ ...state, minWidth: Math.min(920,area.width), minHeight: Math.min(650,area.height), title: '随手记', backgroundColor: '#fffefa', autoHideMenuBar: true, show: false,
     icon: path.join(here, '../assets/icon.ico'),
     webPreferences: { preload: path.join(here, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false } });
   win.setMenu(null);
