@@ -4,7 +4,8 @@ import { EditorState } from '@tiptap/pm/state';
 import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
 import Placeholder from '@tiptap/extension-placeholder';
-import { NotebookPen, Plus, Search, FolderOpen, Trash2, Pin, Tag, Settings2, ChevronDown, MoreHorizontal, ArrowUpRight, Paperclip, ImagePlus, Bold, Italic, Heading2, List, ListOrdered, Link, Undo2, Redo2, X, Check, CircleAlert, RotateCcw, Download, Upload, FileText, ArchiveRestore, HardDrive, LoaderCircle, CheckCheck, BookOpen, Maximize2, PanelLeftClose,PanelLeftOpen,PanelLeft,Columns2,Focus,CheckSquare, ClipboardType, Copy } from 'lucide-react';
+import { Plus, Search, FolderOpen, Trash2, Pin, Settings2, ChevronDown, MoreHorizontal, ArrowUpRight, ArrowLeft, ArrowRight, SlidersHorizontal, PanelLeft, Paperclip, ImagePlus, Bold, Italic, Heading2, List, ListOrdered, Link, Undo2, Redo2, X, Check, CircleAlert, RotateCcw, Download, Upload, FileText, ArchiveRestore, HardDrive, LoaderCircle, BookOpen, Maximize2, Focus, CheckSquare, ClipboardType, Copy } from 'lucide-react';
+import appMark from '../assets/icon.svg';
 import type { AppInfo, Attachment, Filter, Note, NoteDetail, NoteSummary, Overview, RichNode,SortOrder,TextMenuAction } from '../electron/shared';
 import {usePanels,Splitter,rangeSelection} from './layout';
 import {insertPlainText,notePlainText,plainText} from './plain-text';
@@ -35,6 +36,7 @@ export default function App() {
   const textActionRef = useRef<(action: TextMenuAction) => void>(() => {});
   const textMenuRef = useRef<(mode:'context'|'toolbar',x:number,y:number) => void>(() => {});
   const {preferences:layout,setPreferences:setLayout,sizes,style:layoutStyle}=usePanels();
+  const focusEditor=useRef(false);
   const [sort,setSort]=useState<SortOrder>(()=>{const s=localStorage.getItem('suishouji:sort');return s==='title'||s==='created'?s:'updated';});
   const [selecting,setSelecting]=useState(false),[checked,setChecked]=useState<Set<string>>(new Set());
   const anchor=useRef<string|null>(null),listArea=useRef<HTMLDivElement>(null),searchPending=useRef(false);
@@ -56,8 +58,8 @@ export default function App() {
     extensions: [StarterKit.configure({ heading: { levels: [1,2,3] }, link: { openOnClick: false, autolink: false, protocols: ['http','https'] } }), LocalImage, Placeholder.configure({ placeholder: '在这里写下想记住的事…\n也可以粘贴截图，或把文件拖进来。' })],
     editorProps: {
       attributes: { 'aria-label': '记录正文', class: 'note-prose', tabindex: '0' },
-      scrollThreshold: { top: 110, bottom: 24, left: 10, right: 10 },
-      scrollMargin: { top: 110, bottom: 24, left: 10, right: 10 },
+      scrollThreshold: { top: 30, bottom: 24, left: 10, right: 10 },
+      scrollMargin: { top: 30, bottom: 24, left: 10, right: 10 },
       handleDOMEvents: {
         keydown: (_view,event) => {
           if (event.isComposing || event.altKey || !(event.ctrlKey || event.metaKey) || !event.shiftKey) return false;
@@ -171,28 +173,32 @@ export default function App() {
   }
   flushRef.current = flush;
   async function selectNote(id: string) {
-    if (blocked || id === current.current?.note.id) return;
+    if (blocked) return false;
+    if (id === current.current?.note.id) return true;
     setSwitching(true); const seq = ++selectVersion.current;
-    try { if (!await flush()) return; const next = await api.get(id); if (seq === selectVersion.current) showDetail(next); }
+    try { if (!await flush()) return false; const next = await api.get(id); if (seq === selectVersion.current) {showDetail(next);return true;} }
     catch (e) { report(e); } finally { setSwitching(false); }
+    return false;
   }
+  async function openNote(id:string){if(await selectNote(id))setLayout(p=>({...p,view:'document'}));}
+  async function openLibrary(){if(blocked||!await flush())return;clearSelection();setLayout(p=>({...p,view:'library',focused:false}));}
   async function newNote() {
     if (blocked) return;
     clearSelection();setContext(null);
     if (tagInput.trim()) commitTag();
     if (current.current && !current.current.note.deletedAt && !current.current.note.title.trim() && editor?.isEmpty && !current.current.attachments.length && !current.current.note.tags.length) {
-      setQuery(''); editor.view.focus(); return;
+      setQuery('');searchPending.current=false;focusEditor.current=layout.view!=='document'||layout.focused;setLayout(p=>({...p,view:'document',focused:false}));editor.view.focus(); return;
     }
     setSwitching(true);
     try { if (!await flush()) return; setTrash(false); setTag(''); setQuery(''); filterRef.current = { trash:false, tag:'', query:'',sort }; showDetail(await api.create()); await refresh();
       // Focus before enabling the UI. A delayed focus can steal the first title keystrokes.
-      editor?.setEditable(true, false); editor?.commands.setTextSelection(0); editor?.view.focus(); }
+      focusEditor.current=true;setLayout(p=>({...p,view:'document',focused:false}));editor?.setEditable(true, false); editor?.commands.setTextSelection(0); editor?.view.focus(); }
     catch (e) { report(e); } finally { setSwitching(false); }
   }
   newNoteAction.current = () => { void newNote(); };
-  async function changeView(nextTrash: boolean, nextTag = '') {
+  async function changeView(nextTrash: boolean, nextTag = '',browse=false) {
     if (blocked) return; setSwitching(true);
-    try { if (!await flush()) return; clearSelection();setTrash(nextTrash); setTag(nextTag); setQuery(''); filterRef.current = { trash:nextTrash, tag:nextTag, query:'',sort }; const rows = await refresh(); showDetail(rows[0] ? await api.get(rows[0].id) : null); }
+    try { if (!await flush()) return; clearSelection();setTrash(nextTrash); setTag(nextTag); setQuery(''); filterRef.current = { trash:nextTrash, tag:nextTag, query:'',sort }; const rows = await refresh(); showDetail(rows[0] ? await api.get(rows[0].id) : null);if(browse)setLayout(p=>({...p,view:'library',focused:false})); }
     catch (e) { report(e); } finally { setSwitching(false); }
   }
   async function act(action: () => Promise<unknown>, success?: string, reload = false) {
@@ -218,7 +224,7 @@ export default function App() {
         const nearby=[...oldList.slice(oldIndex+1),...oldList.slice(0,Math.max(0,oldIndex)).reverse()].find(n=>rows.some(r=>r.id===n.id))??rows[0];
         showDetail(nearby?await api.get(nearby.id):null);
       }
-      if(result.failed.length){setSelecting(true);setChecked(new Set(result.failed.map(f=>f.id)));notify(`成功 ${result.succeeded.length} 条，失败 ${result.failed.length} 条：${result.failed[0].error}`,true);}
+      if(result.failed.length){setSelecting(true);setChecked(new Set(result.failed.map(f=>f.id)));setLayout(p=>({...p,indexHidden:false,focused:false}));notify(`成功 ${result.succeeded.length} 条，失败 ${result.failed.length} 条：${result.failed[0].error}`,true);}
       else clearSelection();
       if(kind!=='delete'&&result.succeeded.length)setUndo(null);
       if(result.undo){setUndo({...result.undo,count:result.succeeded.length});setUndoSeconds(10);}
@@ -270,7 +276,7 @@ export default function App() {
   useEffect(()=>{const visible=new Set(list.map(n=>n.id));setChecked(previous=>{const next=new Set([...previous].filter(id=>visible.has(id)));return next.size===previous.size?previous:next;});},[list]);
   useEffect(()=>{localStorage.setItem('suishouji:sort',sort);anchor.current=null;},[sort]);
   useEffect(()=>{if(!undo)return;const tick=()=>{const seconds=Math.max(0,Math.ceil((undo.expiresAt-Date.now())/1000));setUndoSeconds(seconds);if(!seconds)setUndo(null);};tick();const timer=setInterval(tick,250);return()=>clearInterval(timer);},[undo]);
-  useLayoutEffect(()=>{if(searchPending.current){searchPending.current=false;searchInput.current?.focus();searchInput.current?.select();}},[layout.focused,layout.listHidden]);
+  useLayoutEffect(()=>{if(searchPending.current){searchPending.current=false;focusEditor.current=false;searchInput.current?.focus();searchInput.current?.select();return;}if(focusEditor.current&&layout.view==='document'&&!switching){focusEditor.current=false;editor?.view.focus();}},[layout.focused,layout.indexHidden,layout.view,switching,editor]);
   useEffect(()=>{if(!context)return;const close=()=>setContext(null);window.addEventListener('resize',close);listArea.current?.addEventListener('scroll',close);return()=>{window.removeEventListener('resize',close);listArea.current?.removeEventListener('scroll',close);};},[context]);
   useEffect(() => {
     const offClose = api.onCloseRequested(() => { void (async () => { if (await flushRef.current()) await api.readyToClose(); })(); });
@@ -285,103 +291,103 @@ export default function App() {
         const key = e.key.toLowerCase();
         if (key === 's') { e.preventDefault(); void flushRef.current(); }
         if (!help && linkValue === null && !zoom && key === 'n') { e.preventDefault(); newNoteAction.current(); }
-        if (!help && linkValue === null && !zoom && key === 'f') { e.preventDefault();if(layout.focused||layout.listHidden){searchPending.current=true;setLayout(p=>({...p,focused:false,listHidden:false}));}else{searchInput.current?.focus();searchInput.current?.select();} }
+        if (!help && linkValue === null && !zoom && key === 'f') { e.preventDefault();focusEditor.current=false;if(layout.view==='document'&&(layout.focused||layout.indexHidden)){searchPending.current=true;setLayout(p=>({...p,focused:false,indexHidden:false}));}else{searchInput.current?.focus();searchInput.current?.select();} }
       }
       if (e.key === 'Escape') { setZoom(null); setHelp(false); setLinkValue(null); setMenu(false); setNoteMenu(false);setContext(null);if(!help&&linkValue===null&&!zoom)clearSelection(); if (!help && linkValue === null && !zoom && document.activeElement === searchInput.current) setQuery(''); }
     };
     window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key);
-  }, [help, linkValue, zoom,layout.focused,layout.listHidden]);
+  }, [help, linkValue, zoom,layout.focused,layout.indexHidden,layout.view]);
 
   const note = detail?.note, files = detail?.attachments.filter(a => a.kind === 'file') ?? [];
-  return <div className="app-shell" style={layoutStyle} onClick={() => { if (menu) setMenu(false); if (noteMenu) setNoteMenu(false);if(context)setContext(null); }}>
-    <aside className={`sidebar ${layout.navCollapsed?'nav-collapsed':''}`} hidden={layout.focused}>
-      <div className="brand"><div className="brand-icon"><NotebookPen size={23}/></div><div><strong>随手记<span className="brand-dot">.</span></strong><span className="brand-sub">你的本地笔记本</span></div></div>
-      <button className="new-button" aria-label="新建记录" title="新建记录 Ctrl+N" onClick={() => void newNote()} disabled={blocked}><Plus size={18}/> 新建记录 <kbd>Ctrl N</kbd></button>
-      <div className="nav-caption">我的空间</div>
-      <button aria-label="全部记录" title="全部记录" className={`nav-item ${!trash && !tag ? 'selected' : ''}`} onClick={() => void changeView(false)} disabled={blocked}><NotebookPen size={17}/><span>全部记录</span><b>{overview.active}</b></button>
-      <button aria-label="回收站" title="回收站" className={`nav-item ${trash ? 'selected' : ''}`} onClick={() => void changeView(true)} disabled={blocked}><Trash2 size={17}/><span>回收站</span>{overview.trash > 0 && <b>{overview.trash}</b>}</button>
-      <div className="nav-caption tag-caption">标签 <Tag size={13}/></div>
-      <div className="tag-nav">{overview.tags.length ? overview.tags.map(t => <button key={t.name} className={`nav-item ${tag === t.name ? 'selected' : ''}`} disabled={blocked} onClick={() => void changeView(false, t.name)}><span className="hash">#</span><span className="truncate">{t.name}</span><b>{t.count}</b></button>) : <p className="sidebar-hint">为记录添加标签，<br/>让零散内容慢慢有序。</p>}</div>
-      <div className="sidebar-footer">
-        <div className="local-badge"><span/> 只在这台电脑保存 <HardDrive size={13}/></div>
-        <div className="settings-anchor"><button className="settings-button" aria-label="数据与设置" title="数据与设置" onClick={e => { e.stopPropagation(); setMenu(!menu); }} disabled={blocked}><Settings2 size={17}/> 数据与设置 <ChevronDown size={14}/></button>
-          {menu && <div className="dropdown settings-menu" onClick={e => e.stopPropagation()}>
-            <button onClick={() => void act(() => api.backup(), '备份已保存，可将备份复制到U盘') }><Download/>备份全部数据</button>
-            <button onClick={() => void act(async () => {const restored=await api.restoreBackup();if(restored){setUndo(null);clearSelection();}return restored;}, '备份已恢复', true)}><ArchiveRestore/>从备份恢复</button>
-            <button onClick={() => void act(() => api.exportNotes(), '已导出为可直接查看的网页')}><Upload/>导出全部记录</button>
-            <div className="menu-line"/>
-            <button onClick={() => void api.openDataDir().catch(report)}><FolderOpen/>打开数据文件夹</button>
-            <button onClick={() => { setMenu(false); setHelp(true); }}><BookOpen/>使用说明与数据位置</button>
+  const inLibrary=layout.view==='library',indexVisible=inLibrary||(!layout.indexHidden&&!layout.focused);
+  const saveStatus=<div className={`save-state ${status}`} role="status" aria-live="polite">
+    {operation||importing||status==='saving'?<LoaderCircle size={13} className="spin"/>:status==='error'?<CircleAlert size={13}/>:<Check size={13}/>}
+    <span>{operation?'正在处理数据…':importing?'正在保存附件…':status==='saved'?'所有更改已保存':status==='dirty'?'等待保存…':status==='saving'?'正在保存…':'保存失败'}</span>
+    {status==='error'&&<button onClick={()=>void flush()}>重试保存</button>}
+  </div>;
+  return <div className={`app-shell ${inLibrary?'library-mode':'document-mode'} ${layout.focused?'is-focused':''} ${layout.filtersCollapsed?'filters-collapsed':''}`} style={layoutStyle} onClick={()=>{if(menu)setMenu(false);if(noteMenu)setNoteMenu(false);if(context)setContext(null);}}>
+    <header className="app-navigation" aria-label="主导航">
+      <button className="app-brand" aria-label="返回手记库" disabled={blocked} onClick={()=>void openLibrary()}><img src={appMark} alt=""/><strong>随手记</strong><span>本地手记</span></button>
+      <nav className="space-tabs" aria-label="记录空间">
+        <button aria-label="全部记录" aria-current={!trash?'page':undefined} className={!trash?'current':''} disabled={blocked} onClick={()=>void changeView(false,'',true)}>手记库 <small>{overview.active}</small></button>
+        <button aria-label="回收站" aria-current={trash?'page':undefined} className={trash?'current':''} disabled={blocked} onClick={()=>void changeView(true,'',true)}>回收站{overview.trash>0&&<small>{overview.trash}</small>}</button>
+      </nav>
+      <div className="navigation-tools">
+        <button className="new-button" aria-label="新建记录" title="新建记录 Ctrl+N" disabled={blocked} onClick={()=>void newNote()}><Plus size={17}/><span>新建记录</span><kbd>Ctrl N</kbd></button>
+        <div className="settings-anchor"><IconButton title="数据与设置" disabled={blocked} onClick={()=>setMenu(!menu)}><Settings2 size={19}/></IconButton>
+          {menu&&<div className="dropdown settings-menu" onClick={e=>e.stopPropagation()}>
+            <div className="menu-heading">本地资料管理</div>
+            <button onClick={()=>void act(()=>api.backup(),'备份已保存，可将备份复制到U盘')}><Download/>备份全部数据</button>
+            <button onClick={()=>void act(async()=>{const restored=await api.restoreBackup();if(restored){setUndo(null);clearSelection();}return restored;},'备份已恢复',true)}><ArchiveRestore/>从备份恢复</button>
+            <button onClick={()=>void act(()=>api.exportNotes(),'已导出为可直接查看的网页')}><Upload/>导出全部记录</button><div className="menu-line"/>
+            <button onClick={()=>void api.openDataDir().catch(report)}><FolderOpen/>打开数据文件夹</button>
+            <button onClick={()=>{setMenu(false);setHelp(true);}}><BookOpen/>使用说明与数据位置</button>
           </div>}
         </div>
       </div>
-    </aside>
-    <Splitter name="导航栏宽度" value={sizes.nav} min={180} max={300} reset={214} hidden={!sizes.navHandle} onChange={navWidth=>setLayout(p=>({...p,navWidth}))}/>
-    <section className="notes-panel" hidden={layout.focused||layout.listHidden}>
-      <header className="list-header"><div><span className="eyebrow">{trash ? '整理空间' : '记录与收藏'}</span><h1 title={tag || undefined}>{trash ? '回收站' : tag ? `# ${tag}` : '全部记录'}<span>{list.length}</span></h1></div><IconButton title="新建记录" onClick={() => void newNote()} disabled={blocked}><Plus size={20}/></IconButton></header>
-      <div className="search-box"><Search size={16}/><input ref={searchInput} aria-label="搜索记录" placeholder="搜索文字、标签或附件" value={query} disabled={blocked} onChange={e => setQuery(e.target.value)}/>{query ? <button aria-label="清除搜索" onClick={() => setQuery('')}><X size={14}/></button> : <kbd>Ctrl F</kbd>}</div>
-      <div className="list-caption"><select aria-label="记录排序" value={sort} disabled={blocked} onChange={e=>setSort(e.target.value as SortOrder)}><option value="updated">最近修改</option><option value="created">最近创建</option><option value="title">标题排序</option></select><button className="multi-toggle" aria-pressed={selecting} disabled={blocked||listPending||!list.length} onClick={()=>{if(selecting)clearSelection();else setSelecting(true);}}><CheckSquare size={13}/>{selecting?'退出多选':'多选'}</button></div>
-      {selecting&&<div className="selection-bar" aria-label="批量操作"><div><span>已选 <strong>{checked.size}</strong> 条</span><button disabled={blocked||listPending} onClick={()=>{setChecked(new Set(list.map(n=>n.id)));anchor.current=list[0]?.id??null;}}>全选当前结果</button><button disabled={blocked} onClick={clearSelection}>取消选择</button></div><div>{trash&&<button disabled={blocked||listPending||!checked.size} onClick={()=>void batchAction('restore',[...checked])}><RotateCcw size={13}/>恢复所选</button>}<button className="danger" disabled={blocked||listPending||!checked.size} onClick={()=>void batchAction(trash?'remove':'delete',[...checked])}><Trash2 size={13}/>{trash?'永久删除所选':'删除所选'}</button></div></div>}
-      {trash&&!selecting&&overview.trash>0&&<div className="trash-list-actions"><span>{query?'当前搜索结果':'可恢复已删除的记录'}</span><button disabled={blocked} onClick={()=>void act(async()=>{await api.emptyTrash();if(!(await api.overview()).trash)setUndo(null);},undefined,true)}>清空回收站</button></div>}
-      <div className="note-list" ref={listArea} tabIndex={0} aria-label="记录列表" aria-busy={listPending} onKeyDown={e=>{
-        if(e.nativeEvent.isComposing||(e.target as HTMLElement).closest('input:not([type=checkbox]),textarea,[contenteditable=true]'))return;
-        if(blocked||listPending){if(e.key==='Delete'||(e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='a'){e.preventDefault();e.stopPropagation();}return;}
-        if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='a'){e.preventDefault();e.stopPropagation();setSelecting(true);setChecked(new Set(list.map(n=>n.id)));}
-        if(e.key==='Delete'){e.preventDefault();e.stopPropagation();const id=(e.target as HTMLElement).closest('[data-note-id]')?.getAttribute('data-note-id');void batchAction(trash?'remove':'delete',selecting?[...checked]:id?[id]:[]);}
-      }}>{list.map(n => <div className={`note-row ${checked.has(n.id)?'is-checked':''}`} data-note-id={n.id} key={n.id} onContextMenu={e=>openContext(e,n.id)}>
-        {selecting&&<input className="note-checkbox" type="checkbox" aria-label={`选择 ${titleFor(n)}`} checked={checked.has(n.id)} disabled={blocked||listPending} onChange={e=>toggleSelection(n.id,!!(e.nativeEvent as MouseEvent).shiftKey)} onClick={e=>e.stopPropagation()}/>}
-        <button className={`note-card ${note?.id === n.id ? 'selected' : ''}`} disabled={blocked||listPending} onClick={e=>{if(selecting||e.ctrlKey||e.metaKey||e.shiftKey)toggleSelection(n.id,e.shiftKey);else void selectNote(n.id);}}>
-        <div className="card-top"><h3>{titleFor(n)}</h3>{n.pinned && <Pin size={13} className="pin-mark" aria-label="已置顶"/>}</div>
-        <p>{n.plainText.replaceAll('\n',' ').slice(0,100) || (n.attachmentCount ? '已保存附件，点击查看' : '还没有写下内容')}</p>
-        <div className="card-bottom"><time className="card-date" dateTime={n.updatedAt}>{formatDate(n.updatedAt)}</time><div>{n.tags.slice(0,2).map(t => <span key={t}># {t}</span>)}</div>{n.attachmentCount > 0 && <span className="card-attachment"><Paperclip size={12}/>{n.attachmentCount}</span>}</div>
-      </button></div>)}{!list.length && <div className="list-empty">{query?<Search size={25}/>:trash?<Trash2 size={25}/>:<NotebookPen size={25}/>}<p>{query ? '没有找到相关记录' : trash ? '回收站是空的' : '从第一条记录开始'}</p><small>{query ? '换个关键词试试看' : trash ? '删除的记录会出现在这里' : '点击“新建记录”，留住此刻的想法'}</small></div>}</div>
-      <footer className="list-footer"><span className="tiny-dot"/> 本地存储 · 自动保存</footer>
-    </section>
-    <Splitter name="记录列表宽度" value={sizes.list} min={240} max={480} reset={306} hidden={!sizes.listHandle} onChange={listWidth=>setLayout(p=>({...p,listWidth}))}/>
-    <main className="editor-panel" onDragOver={e => { if (e.dataTransfer.types.includes('Files')) e.preventDefault(); }} onDrop={e => { if ((e.target as HTMLElement).closest('.tiptap')) return; if (e.dataTransfer.files.length) { e.preventDefault(); ingest([...e.dataTransfer.files], false); } }}>
-      <header className="workspace-header">
-      <div className="layout-controls" aria-label="布局控制"><span>视图</span><div><IconButton title={layout.focused||layout.navCollapsed?'展开导航栏':'收起导航栏'} active={layout.navCollapsed} onClick={()=>setLayout(p=>({...p,focused:false,navCollapsed:p.focused?false:!p.navCollapsed}))}>{layout.focused||layout.navCollapsed?<PanelLeftOpen size={17}/>:<PanelLeftClose size={17}/>}</IconButton><IconButton title={layout.focused||layout.listHidden?'显示记录列表':'隐藏记录列表'} active={layout.listHidden} onClick={()=>setLayout(p=>({...p,focused:false,listHidden:p.focused?false:!p.listHidden}))}><Columns2 size={17}/></IconButton><IconButton title={layout.focused?'退出专注模式':'进入专注模式'} active={layout.focused} onClick={()=>setLayout(p=>({...p,focused:!p.focused}))}><Focus size={17}/><span className="focus-label">{layout.focused?'退出专注':'专注'}</span></IconButton></div></div>
-      {note && <div className="editor-header">
-          <div className="editor-actions">{!note.deletedAt && <button className="attachment-trigger" aria-label="添加图片或文件" disabled={blocked} onClick={() => void pickFiles()}><Paperclip size={16}/><span>图片 / 文件</span></button>}{note.deletedAt ? <button className="text-button" disabled={blocked} onClick={() => void batchAction('restore',[note.id])}><RotateCcw size={15}/>恢复记录</button> : <IconButton title={note.pinned ? '取消置顶' : '置顶记录'} active={note.pinned} disabled={blocked} onClick={() => void act(async () => { await api.pin(note.id, !note.pinned); const updated = await api.get(note.id); current.current = updated; setDetail(updated); })}><Pin size={17}/></IconButton>}
-            <div className="note-menu-anchor"><IconButton title="更多记录操作" onClick={() => setNoteMenu(!noteMenu)} disabled={blocked}><MoreHorizontal size={21}/></IconButton>{noteMenu && <div className="dropdown note-menu" onClick={e => e.stopPropagation()}>
-              <button disabled={clipboardBusy} onClick={() => { setNoteMenu(false); void textAction('copyAllPlain'); }}><Copy/>复制全文为纯文本</button>
-              <button onClick={() => void act(() => api.exportNotes(note.id), '记录已导出')}><Upload/>导出这条记录</button>
-              {note.deletedAt ? <button className="danger" onClick={() => void batchAction('remove',[note.id])}><Trash2/>永久删除</button> : <button className="danger" onClick={() => void batchAction('delete',[note.id])}><Trash2/>移到回收站</button>}
-            </div>}</div>
+    </header>
+    <div className="workbench">
+      <section className="notes-panel" aria-label={inLibrary?'手记库':'记录目录'} hidden={!indexVisible}>
+        <div className="collection-heading">
+          <div><div className="section-overline">{trash?'已删除的记录':'文字 · 图片 · 文件'}</div><h1>{trash?'回收站':tag?tag:'手记库'}<span>{list.length} 条记录</span></h1><p>{trash?'留在这里，仍然可以找回。':'把值得留下的，放在一起。'}</p></div>
+          {!inLibrary&&<div className="index-heading-actions"><IconButton title="展开手记库" onClick={()=>void openLibrary()}><Maximize2 size={16}/></IconButton><IconButton title="关闭记录目录" onClick={()=>setLayout(p=>({...p,indexHidden:true}))}><X size={17}/></IconButton></div>}
+          {inLibrary&&note&&<button className="resume-note" disabled={blocked} onClick={()=>void openNote(note.id)}><span>继续上次的记录</span><strong>{titleFor(note)}</strong><ArrowUpRight size={18}/></button>}
+        </div>
+        <div className="collection-tools">
+          <div className="search-box"><Search size={17}/><input ref={searchInput} aria-label="搜索记录" placeholder="查找标题、正文或文件…" value={query} disabled={blocked} onChange={e=>setQuery(e.target.value)}/>{query?<button aria-label="清除搜索" onClick={()=>setQuery('')}><X size={15}/></button>:<kbd>Ctrl F</kbd>}</div>
+          <div className="index-options"><select aria-label="记录排序" value={sort} disabled={blocked} onChange={e=>setSort(e.target.value as SortOrder)}><option value="updated">最近修改</option><option value="created">最近创建</option><option value="title">标题排序</option></select><button className="filter-toggle" aria-label={layout.filtersCollapsed?'展开标签筛选':'收起标签筛选'} aria-expanded={!layout.filtersCollapsed} onClick={()=>setLayout(p=>({...p,filtersCollapsed:!p.filtersCollapsed}))}><SlidersHorizontal size={15}/><span>筛选</span></button><button className="multi-toggle" aria-pressed={selecting} disabled={blocked||listPending||!list.length} onClick={()=>{if(selecting)clearSelection();else setSelecting(true);}}><CheckSquare size={15}/>{selecting?'退出多选':'多选'}</button></div>
+        </div>
+        <div className="collection-filters" hidden={layout.filtersCollapsed} aria-label="标签筛选"><span>标签</span><button disabled={blocked} className={!tag?'chosen':''} onClick={()=>void changeView(trash)}>全部</button>{overview.tags.map(t=><button disabled={blocked} key={t.name} className={tag===t.name?'chosen':''} onClick={()=>void changeView(false,t.name)}>{t.name}<small>{t.count}</small></button>)}{!overview.tags.length&&<span className="filter-empty">在记录中添加标签，即可在这里筛选</span>}</div>
+        {selecting?<div className="selection-bar" aria-label="批量操作"><strong>已选 {checked.size} 条</strong><button disabled={blocked||listPending} onClick={()=>{setChecked(new Set(list.map(n=>n.id)));anchor.current=list[0]?.id??null;}}>全选当前结果</button><button disabled={blocked} onClick={clearSelection}>取消选择</button><div>{trash&&<button disabled={blocked||listPending||!checked.size} onClick={()=>void batchAction('restore',[...checked])}><RotateCcw size={14}/>恢复所选</button>}<button className="danger" disabled={blocked||listPending||!checked.size} onClick={()=>void batchAction(trash?'remove':'delete',[...checked])}><Trash2 size={14}/>{trash?'永久删除所选':'删除所选'}</button></div></div>:trash&&overview.trash>0?<div className="trash-list-actions"><span>恢复后可继续编辑</span><button disabled={blocked} onClick={()=>void act(async()=>{await api.emptyTrash();if(!(await api.overview()).trash)setUndo(null);},undefined,true)}>清空回收站</button></div>:null}
+        <div className="index-columns" aria-hidden="true"><span>序</span><span>记录</span><span>标签</span><span>附件</span><span>{sort==='created'?'创建时间':'修改时间'}</span><span/></div>
+        <div className="note-list" ref={listArea} tabIndex={0} aria-label="记录列表" aria-busy={listPending} onKeyDown={e=>{
+          if(e.nativeEvent.isComposing||(e.target as HTMLElement).closest('input:not([type=checkbox]),textarea,[contenteditable=true]'))return;
+          if(blocked||listPending){if(e.key==='Delete'||(e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='a'){e.preventDefault();e.stopPropagation();}return;}
+          if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='a'){e.preventDefault();e.stopPropagation();setSelecting(true);setChecked(new Set(list.map(n=>n.id)));}
+          if(e.key==='Delete'){e.preventDefault();e.stopPropagation();const id=(e.target as HTMLElement).closest('[data-note-id]')?.getAttribute('data-note-id');void batchAction(trash?'remove':'delete',selecting?[...checked]:id?[id]:[]);}
+        }}>
+          {list.map((n,i)=><div className={`note-row ${checked.has(n.id)?'is-checked':''}`} data-note-id={n.id} key={n.id} onContextMenu={e=>openContext(e,n.id)}>
+            {selecting&&<input className="note-checkbox" type="checkbox" aria-label={`选择 ${titleFor(n)}`} checked={checked.has(n.id)} disabled={blocked||listPending} onChange={e=>toggleSelection(n.id,!!(e.nativeEvent as MouseEvent).shiftKey)} onClick={e=>e.stopPropagation()}/>}
+            <button className={`index-entry note-card ${note?.id===n.id?'selected':''}`} disabled={blocked||listPending} onClick={e=>{if(selecting||e.ctrlKey||e.metaKey||e.shiftKey)toggleSelection(n.id,e.shiftKey);else void openNote(n.id);}}>
+              <span className="entry-number">{n.pinned?<Pin size={13} aria-label="已置顶"/>:String(i+1).padStart(2,'0')}</span>
+              <span className="entry-content"><strong>{titleFor(n)}</strong><span>{n.plainText.replaceAll('\n',' ').slice(0,140)||(n.attachmentCount?'已保存图片或文件':'还没有写下内容')}</span></span>
+              <span className="entry-tags">{n.tags.slice(0,2).map(t=><span key={t}>{t}</span>)}</span>
+              <span className="entry-files">{n.attachmentCount>0?<><Paperclip size={13}/>{n.attachmentCount}</>:<span>—</span>}</span>
+              <time className="entry-date" dateTime={sort==='created'?n.createdAt:n.updatedAt}>{formatDate(sort==='created'?n.createdAt:n.updatedAt)}</time><ArrowUpRight size={16} className="entry-arrow"/>
+            </button>
+          </div>)}
+          {!list.length&&<div className="list-empty"><div className="empty-rule"/><span className="section-overline">{query?'没有匹配的记录':trash?'这里是空的':'从一条记录开始'}</span><h2>{query?'换一个关键词试试。':trash?'暂时没有需要找回的记录。':'给零散的想法，一个位置。'}</h2><p>{query?'可以搜索标题、正文、标签和附件名称。':trash?'删除的记录会保留在这里，需要时可以恢复。':'写一段文字，粘贴一张截图，或拖入一份文件。'}</p>{!query&&!trash&&<button className="empty-create" disabled={blocked} onClick={()=>void newNote()}>新建第一条记录 <ArrowRight size={16}/></button>}</div>}
+        </div>
+        <footer className="index-footer"><span>{query?`“${query}” 的搜索结果`:tag?`标签：${tag}`:trash?'回收站中的记录可恢复':'你的资料只保存在这台电脑'}</span><span>{list.length} 条</span></footer>
+      </section>
+      <Splitter name="记录列表宽度" value={sizes.index} min={280} max={520} reset={350} hidden={inLibrary||!sizes.handle} onChange={indexWidth=>setLayout(p=>({...p,indexWidth}))}/>
+      <main className="editor-panel" hidden={inLibrary} onDragOver={e=>{if(e.dataTransfer.types.includes('Files'))e.preventDefault();}} onDrop={e=>{if((e.target as HTMLElement).closest('.tiptap'))return;if(e.dataTransfer.files.length){e.preventDefault();ingest([...e.dataTransfer.files],false);}}}>
+        <header className="document-command" aria-label="记录操作">
+          <div className="document-navigation"><button className="back-library" disabled={blocked} onClick={()=>void openLibrary()}><ArrowLeft size={15}/><span>手记库</span></button><span className="command-divider"/><IconButton title={layout.focused||layout.indexHidden?'显示记录列表':'隐藏记录列表'} active={!layout.indexHidden&&!layout.focused} onClick={()=>setLayout(p=>({...p,focused:false,indexHidden:p.focused?false:!p.indexHidden}))}><PanelLeft size={17}/></IconButton><IconButton title={layout.focused?'退出专注模式':'进入专注模式'} active={layout.focused} onClick={()=>setLayout(p=>({...p,focused:!p.focused}))}><Focus size={17}/></IconButton></div>
+          <div className="editor-actions">{note&&!note.deletedAt&&<button className="attachment-trigger" aria-label="添加图片或文件" disabled={blocked} onClick={()=>void pickFiles()}><Plus size={14}/><span>图片 / 文件</span></button>}{note&&(note.deletedAt?<button className="restore-button" disabled={blocked} onClick={()=>void batchAction('restore',[note.id])}><RotateCcw size={15}/>恢复记录</button>:<IconButton title={note.pinned?'取消置顶':'置顶记录'} active={note.pinned} disabled={blocked} onClick={()=>void act(async()=>{await api.pin(note.id,!note.pinned);const next=await api.get(note.id);current.current=next;setDetail(next);})}><Pin size={16}/></IconButton>)}
+            {note&&<div className="note-menu-anchor"><IconButton title="更多记录操作" disabled={blocked} onClick={()=>setNoteMenu(!noteMenu)}><MoreHorizontal size={20}/></IconButton>{noteMenu&&<div className="dropdown note-menu" onClick={e=>e.stopPropagation()}><button disabled={clipboardBusy} onClick={()=>{setNoteMenu(false);void textAction('copyAllPlain');}}><Copy/>复制全文为纯文本</button><button onClick={()=>void act(()=>api.exportNotes(note.id),'记录已导出')}><Upload/>导出这条记录</button><div className="menu-line"/><button className="danger" onClick={()=>void batchAction(note.deletedAt?'remove':'delete',[note.id])}><Trash2/>{note.deletedAt?'永久删除':'移到回收站'}</button></div>}</div>}
           </div>
-        </div>}
-      </header>
-      {note ? <>
-        {note.deletedAt && <div className="trash-banner"><Trash2 size={15}/>这条记录在回收站中，恢复后可以继续编辑。</div>}
-        <div className="editor-scroll"><article className="writing-area">
-          <div className="record-meta"><span className="record-type"><FileText size={13}/> {note.deletedAt ? '已删除的记录' : '随手记录'}</span><span>{fullDate(note.createdAt)} 创建</span></div>
-          <input className="title-input" aria-label="记录标题" placeholder="无标题也没关系" maxLength={300} value={note.title} disabled={readOnly} onChange={e => markChanged({ title: e.target.value })}/>
-          <div className="record-tags">{note.tags.map(t => <span className="tag-chip" key={t}># {t}{!readOnly && <button aria-label={`移除标签 ${t}`} onClick={() => markChanged({ tags:note.tags.filter(x => x !== t) })}><X size={11}/></button>}</span>)}{!readOnly && <div className="tag-input-wrap"><Tag size={12}/><input aria-label="添加标签" placeholder="添加标签" value={tagInput} maxLength={31} onChange={e => setTagInput(e.target.value)} onBlur={commitTag} onKeyDown={e => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); commitTag(); } }}/></div>}</div>
+        </header>
+        {note?<>
           <div className="toolbar" role="toolbar" aria-label="文字格式">
-            <IconButton title="标题" active={editor?.isActive('heading')} disabled={readOnly} onClick={() => editor?.chain().focus().toggleHeading({level:2}).run()}><Heading2 size={18}/></IconButton>
-            <IconButton title="加粗 Ctrl+B" active={editor?.isActive('bold')} disabled={readOnly} onClick={() => editor?.chain().focus().toggleBold().run()}><Bold size={16}/></IconButton>
-            <IconButton title="斜体 Ctrl+I" active={editor?.isActive('italic')} disabled={readOnly} onClick={() => editor?.chain().focus().toggleItalic().run()}><Italic size={16}/></IconButton><i/>
-            <IconButton title="项目列表" active={editor?.isActive('bulletList')} disabled={readOnly} onClick={() => editor?.chain().focus().toggleBulletList().run()}><List size={18}/></IconButton>
-            <IconButton title="编号列表" active={editor?.isActive('orderedList')} disabled={readOnly} onClick={() => editor?.chain().focus().toggleOrderedList().run()}><ListOrdered size={18}/></IconButton>
-            <IconButton title="插入网页链接" active={editor?.isActive('link')} disabled={readOnly} onClick={() => setLinkValue(editor?.getAttributes('link').href ?? 'https://')}><Link size={16}/></IconButton><i/>
-            <IconButton title="添加图片或附件" disabled={readOnly} onClick={() => void pickFiles()}><ImagePlus size={17}/></IconButton>
-            <button type="button" className="plain-text-trigger" aria-label="纯文本复制与粘贴" title="纯文本复制与粘贴" aria-haspopup="menu" aria-expanded={textMenuOpen} disabled={blocked||clipboardBusy} onMouseDown={e=>e.preventDefault()} onClick={e=>{e.stopPropagation();const rect=e.currentTarget.getBoundingClientRect();void showTextMenu('toolbar',rect.left,rect.bottom+4);}}><ClipboardType size={16}/><span>纯文本</span><ChevronDown size={12}/></button>
-            <span className="toolbar-spacer"/>
-            <div className="toolbar-history"><IconButton title="撤销 Ctrl+Z" disabled={readOnly || !editor?.can().undo()} onClick={() => editor?.chain().focus().undo().run()}><Undo2 size={16}/></IconButton>
-            <IconButton title="重做 Ctrl+Y" disabled={readOnly || !editor?.can().redo()} onClick={() => editor?.chain().focus().redo().run()}><Redo2 size={16}/></IconButton></div>
+            <span className="tool-label">文字</span><IconButton title="标题" active={editor?.isActive('heading')} disabled={readOnly} onClick={()=>editor?.chain().focus().toggleHeading({level:2}).run()}><Heading2 size={18}/></IconButton><IconButton title="加粗 Ctrl+B" active={editor?.isActive('bold')} disabled={readOnly} onClick={()=>editor?.chain().focus().toggleBold().run()}><Bold size={16}/></IconButton><IconButton title="斜体 Ctrl+I" active={editor?.isActive('italic')} disabled={readOnly} onClick={()=>editor?.chain().focus().toggleItalic().run()}><Italic size={16}/></IconButton><i/>
+            <span className="tool-label">段落</span><IconButton title="项目列表" active={editor?.isActive('bulletList')} disabled={readOnly} onClick={()=>editor?.chain().focus().toggleBulletList().run()}><List size={18}/></IconButton><IconButton title="编号列表" active={editor?.isActive('orderedList')} disabled={readOnly} onClick={()=>editor?.chain().focus().toggleOrderedList().run()}><ListOrdered size={18}/></IconButton><IconButton title="插入网页链接" active={editor?.isActive('link')} disabled={readOnly} onClick={()=>setLinkValue(editor?.getAttributes('link').href??'https://')}><Link size={16}/></IconButton><i/>
+            <IconButton title="添加图片或附件" disabled={readOnly} onClick={()=>void pickFiles()}><ImagePlus size={17}/></IconButton><button type="button" className="plain-text-trigger" aria-label="纯文本复制与粘贴" title="纯文本复制与粘贴" aria-haspopup="menu" aria-expanded={textMenuOpen} disabled={blocked||clipboardBusy} onMouseDown={e=>e.preventDefault()} onClick={e=>{e.stopPropagation();const r=e.currentTarget.getBoundingClientRect();void showTextMenu('toolbar',r.left,r.bottom+4);}}><ClipboardType size={16}/><span>纯文本</span><ChevronDown size={12}/></button>
+            <span className="toolbar-spacer"/><div className="toolbar-history"><IconButton title="撤销 Ctrl+Z" disabled={readOnly||!editor?.can().undo()} onClick={()=>editor?.chain().focus().undo().run()}><Undo2 size={16}/></IconButton><IconButton title="重做 Ctrl+Y" disabled={readOnly||!editor?.can().redo()} onClick={()=>editor?.chain().focus().redo().run()}><Redo2 size={16}/></IconButton></div>
           </div>
-          {editor?.isActive('image') && !readOnly && <div className="image-controls"><Maximize2 size={13}/><span>图片大小</span>{[280,560,800].map(w => <button key={w} onClick={() => editor.chain().focus().updateAttributes('image', {width:w}).run()}>{w === 280 ? '小' : w === 560 ? '中' : '大'}</button>)}<span>· 点击图片查看原图</span></div>}
-          <EditorContent editor={editor}/>
-          <section className="attachments-section"><div className="section-label"><Paperclip size={14}/><span>附件</span><b>{files.length || ''}</b>{!readOnly && <button onClick={() => void pickFiles()}><Plus size={13}/>添加附件</button>}</div>
-            {files.length ? <div className="attachment-grid">{files.map(a => <button className="attachment-card" key={a.id} title={`打开 ${a.name}`} onClick={() => void api.openAttachment(a.id).catch(report)}><span className="file-icon"><FileText size={20}/></span><span><strong>{a.name}</strong><small>{sizeFor(a.size)} · 已保存副本</small></span><ArrowUpRight size={14}/></button>)}</div> : <p className="attachment-hint">把文件拖到这里，或点击添加。原文件移动后也能打开。</p>}
-          </section>
-        </article></div>
-        <footer className="editor-footer"><span>{note.plainText.replace(/\s/g,'').length} 字<span className="footer-divider">·</span>{note.deletedAt ? '回收站 · 只读' : '本地记录'}</span><div className={`save-state ${status}`} role="status" aria-live="polite">
-          {operation || importing || status === 'saving' ? <LoaderCircle size={14} className="spin"/> : status === 'error' ? <CircleAlert size={14}/> : <CheckCheck size={15}/>}
-          {operation ? '正在处理数据…' : importing ? '正在保存附件…' : status === 'saved' ? '所有更改已保存' : status === 'dirty' ? '等待保存…' : status === 'saving' ? '正在保存…' : '保存失败'}
-          {status === 'error' && <button onClick={() => void flush()}>重试</button>}</div></footer>
-      </> : <div className="welcome"><div className="welcome-mark" aria-hidden="true">{trash?<Trash2 size={36} strokeWidth={1.4}/>:<NotebookPen size={36} strokeWidth={1.4}/>}</div><span className="eyebrow">{trash?'回收站':'属于你的记录空间'}</span><h2>{trash ? (overview.trash?'值得留下的，还能找回。':'这里暂时没有记录。') : '把零散的想法，\n好好放在一起。'}</h2><p>{trash ? (overview.trash?'在列表中选择记录，即可查看或恢复。':'移到回收站的记录会保留在这里，\n需要时可以恢复。') : '文字、截图、文件，都有自己的位置。\n从一条简单的记录开始。'}</p>{trash?<button className="welcome-button" disabled={blocked} onClick={()=>void changeView(false)}><NotebookPen size={18}/>返回全部记录</button>:<button className="welcome-button" disabled={blocked} onClick={() => void newNote()}><Plus size={18}/>{overview.active ? '写一条新记录' : '写下第一条记录'}<kbd>Ctrl N</kbd></button>}{!trash&&<div className="welcome-features"><span><Check size={14}/>自动保存</span><span><HardDrive size={14}/>本地存储</span><span><FolderOpen size={14}/>自由备份</span></div>}</div>}
-    </main>
+          {note.deletedAt&&<div className="trash-banner"><Trash2 size={14}/>回收站中的记录只供查看，恢复后可以继续编辑。</div>}
+          <div className="editor-scroll"><div className="document-desk"><article className="writing-area">
+            <header className="page-heading"><div className="record-type">{note.deletedAt?'回收站 / 只读':'随手记录'}</div><input className="title-input" aria-label="记录标题" placeholder="给这条记录起个名字" maxLength={300} value={note.title} disabled={readOnly} onChange={e=>markChanged({title:e.target.value})}/><div className="record-tags">{note.tags.map(t=><span className="tag-chip" key={t}># {t}{!readOnly&&<button aria-label={`移除标签 ${t}`} onClick={()=>markChanged({tags:note.tags.filter(x=>x!==t)})}><X size={11}/></button>}</span>)}{!readOnly&&<div className="tag-input-wrap"><Plus size={12}/><input aria-label="添加标签" placeholder="添加标签" value={tagInput} maxLength={31} onChange={e=>setTagInput(e.target.value)} onBlur={commitTag} onKeyDown={e=>{if(e.key==='Enter'||e.key===','){e.preventDefault();commitTag();}}}/></div>}</div></header>
+            {editor?.isActive('image')&&!readOnly&&<div className="image-controls"><span>图片宽度</span>{[280,560,800].map(w=><button key={w} onClick={()=>editor.chain().focus().updateAttributes('image',{width:w}).run()}>{w===280?'小':w===560?'中':'大'}</button>)}<span>点击图片查看原图</span></div>}
+            <EditorContent editor={editor}/>
+            <section className="attachments-section"><div className="section-label"><h2>随附文件 <span>{files.length||''}</span></h2>{!readOnly&&<button onClick={()=>void pickFiles()}><Plus size={14}/>添加附件</button>}</div>{files.length?<div className="attachment-grid">{files.map(a=><button className="attachment-card" key={a.id} title={`打开 ${a.name}`} onClick={()=>void api.openAttachment(a.id).catch(report)}><FileText size={22}/><span><strong>{a.name}</strong><small>{sizeFor(a.size)} · 已保存副本</small></span><ArrowUpRight size={16}/></button>)}</div>:<p className="attachment-hint">拖入文件或点击添加，副本会随这条记录一起保存。</p>}</section>
+            <div className="page-end"><span>—</span><small>{note.plainText.replace(/\s/g,'').length} 字</small></div>
+          </article><aside className="page-details" aria-label="记录信息"><span className="section-overline">关于这条记录</span><dl><div><dt>创建于</dt><dd>{fullDate(note.createdAt)}</dd></div><div><dt>最近修改</dt><dd>{fullDate(note.updatedAt)}</dd></div><div><dt>内容</dt><dd>{note.plainText.replace(/\s/g,'').length} 字 · {detail?.attachments.length??0} 个图片及文件</dd></div></dl><div className="local-note"><HardDrive size={15}/><p>保存在本地<br/><span>记录仅属于你</span></p></div></aside></div></div>
+        </>:<div className="document-empty"><span className="section-overline">书写页</span><h2>准备记点什么？</h2><p>从手记库选择一条记录，或新建一页。</p><button onClick={()=>void newNote()} disabled={blocked}>新建记录 <ArrowRight size={16}/></button></div>}
+      </main>
+    </div>
+    <footer className="app-status"><span><HardDrive size={12}/><span>本地存储</span><b>·</b>{inLibrary?'手记库':layout.focused?'专注书写':'书写页'}</span>{saveStatus}<span className="status-hint">{inLibrary?'Ctrl N 新建 · Ctrl F 查找':note?.deletedAt?'回收站 · 只读':`${note?.plainText.replace(/\s/g,'').length??0} 字 · Ctrl S 保存`}</span></footer>
+
     {context&&<div className="dropdown context-menu" role="menu" aria-label="记录右键菜单" style={{left:Math.max(8,context.x),top:Math.max(8,context.y)}} onClick={e=>e.stopPropagation()} onKeyDown={e=>{if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();const buttons=[...e.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')],at=buttons.indexOf(document.activeElement as HTMLButtonElement);buttons[(at+(e.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length]?.focus();}}}>
       {!trash&&context.ids.length===1&&<><button role="menuitem" onClick={()=>contextPin(context.ids[0])}><Pin/>{list.find(n=>n.id===context.ids[0])?.pinned?'取消置顶':'置顶记录'}</button><button role="menuitem" onClick={()=>void act(()=>api.exportNotes(context.ids[0]),'记录已导出')}><Upload/>导出记录</button></>}
       <button role="menuitem" onClick={()=>{setSelecting(true);setChecked(new Set(context.ids));setContext(null);}}><CheckSquare/>选择记录</button>
@@ -394,13 +400,14 @@ export default function App() {
     {zoom && <div className="image-modal" role="dialog" aria-label="查看图片" onClick={() => setZoom(null)}><button aria-label="关闭图片"><X size={24}/></button><img src={zoom} alt="记录中的图片"/><span>点击任意位置或按 Esc 关闭</span></div>}
     {linkValue !== null && <div className="modal-backdrop" onClick={() => setLinkValue(null)}><div className="help-dialog" role="dialog" aria-label="插入网页链接" onClick={e => e.stopPropagation()}><button className="modal-close" aria-label="关闭链接设置" onClick={() => setLinkValue(null)}><X size={19}/></button><h2>添加一个网页链接</h2><p>输入 http:// 或 https:// 开头的网址。留空可以移除当前链接。</p><form className="link-form" onSubmit={e => { e.preventDefault(); const href = linkValue.trim(); if (!href) editor?.chain().focus().extendMarkRange('link').unsetLink().run(); else if (/^https?:\/\//i.test(href)) editor?.chain().focus().extendMarkRange('link').setLink({href}).run(); else { notify('请输入 http:// 或 https:// 开头的网页地址', true); return; } setLinkValue(null); }}><input aria-label="网页地址" autoFocus value={linkValue} onChange={e => setLinkValue(e.target.value)}/><button type="submit">确定</button></form></div></div>}
     {help && <div className="modal-backdrop" onClick={() => setHelp(false)}><div className="help-dialog" role="dialog" aria-label="使用说明" onClick={e => e.stopPropagation()}>
-      <button className="modal-close" aria-label="关闭说明" onClick={() => setHelp(false)}><X size={19}/></button><div className="brand-icon"><NotebookPen size={24}/></div><h2>用起来，就这么简单。</h2>
+      <button className="modal-close" aria-label="关闭说明" onClick={() => setHelp(false)}><X size={19}/></button><img className="help-brand" src={appMark} alt=""/><h2>从资料库，到书写页。</h2>
       <p>点击新建，直接输入。文字自动保存；截图可以粘贴，图片和文件可以拖入。标签输入后按回车即可添加。</p>
       <div className="shortcut-help"><span><kbd>Ctrl N</kbd> 新建记录</span><span><kbd>Ctrl F</kbd> 搜索记录</span><span><kbd>Ctrl S</kbd> 立即保存</span></div>
       <p>选中正文后按 <strong>Ctrl+Shift+C</strong> 复制为纯文本，按 <strong>Ctrl+Shift+V</strong> 粘贴为纯文本；也可右键正文或点击工具栏“纯文本”。去掉来源格式并保留换行，粘贴位置已有的段落或列表布局会保留。记录右上角“更多记录操作”可复制全文纯文本，包含标题和正文，不包含图片及附件。原有 Ctrl+C / Ctrl+V 保留格式复制和粘贴。</p>
       <p>列表上方点击“多选”，或按住 Ctrl 点击记录。Shift 点击连续选择；全选只选中当前筛选结果。在列表中按 Delete 可以删除所选记录，输入文字时仍按正常文字编辑处理。</p>
       <p>移入回收站后，右下角有 10 秒“撤销”。回收站可批量恢复或永久删除；右键记录也有常用操作。</p>
-      <p>拖动两栏之间的分隔线调整宽度，双击恢复默认。正文上方的三个布局按钮可收起导航、隐藏列表或进入专注模式；Ctrl+F 会自动展开搜索。布局、排序和窗口大小都会记住。</p>
+      <p>顶部“手记库”和“回收站”用于切换记录空间。手记库按行展示记录，点击一行进入书写页；左上角“手记库”可返回完整索引。标签筛选、排序和多选位于索引上方。</p>
+      <p>书写页上方的目录按钮可打开记录目录；拖动目录右边的分隔线调整宽度，双击恢复默认。专注模式隐藏顶部导航和目录，再次点击恢复。Ctrl+F 自动打开目录并聚焦搜索。场景、目录宽度、筛选收起状态、排序和窗口大小都会记住。</p>
       <p>再次打开会回到上次查看的记录。连续点击新建时，会继续使用当前的空白记录。</p>
       <p>关闭窗口就会退出软件。换电脑前，先关闭软件，再复制<strong>整个软件文件夹</strong>，包含里面的“我的数据”。</p>
       <p>每天首次打开时自动备份，保留最近七份。也可以在“数据与设置”中手动备份到U盘。恢复前会校验文件，并备份现有记录。</p>

@@ -20,10 +20,10 @@ try{
  await page.getByLabel('添加标签',{exact:true}).fill('灵感');await page.getByLabel('添加标签',{exact:true}).press('Enter');
  await until(()=>page.evaluate(async()=>(await window.notes.list({}))[0]?.tags.length===2));
  const first=(await page.evaluate(()=>window.notes.list({})))[0];await page.evaluate(id=>window.notes.pin(id,true),first.id);
- await page.keyboard.press('Control+f');assert.equal(await page.getByLabel('搜索记录').evaluate(n=>n===document.activeElement),true);
+ await page.keyboard.press('Control+f');await until(()=>page.getByLabel('搜索记录').evaluate(n=>n===document.activeElement));
  await page.getByLabel('搜索记录').fill('不存在');await page.keyboard.press('Escape');assert.equal(await page.getByLabel('搜索记录').inputValue(),'');
  const caption=await page.getByRole('textbox',{name:'记录正文'}).evaluate(n=>parseFloat(getComputedStyle(n).fontSize));assert.ok(caption>=16);
- const navContrast=await page.locator('.sidebar').evaluate(n=>{
+ const navContrast=await page.locator('.app-navigation').evaluate(n=>{
    const luminance=color=>{const rgb=color.match(/[\d.]+/g).slice(0,3).map(Number).map(c=>{const v=c/255;return v<=.04045?v/12.92:((v+.055)/1.055)**2.4;});return rgb[0]*.2126+rgb[1]*.7152+rgb[2]*.0722;};
    const style=getComputedStyle(n),a=luminance(style.color),b=luminance(style.backgroundColor);return (Math.max(a,b)+.05)/(Math.min(a,b)+.05);
  });assert.ok(navContrast>=4.5,'导航文字与背景应有清晰对比');

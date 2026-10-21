@@ -108,8 +108,9 @@ try{
   await page.locator('.tiptap').focus();await page.keyboard.press('Control+End');await page.keyboard.press('Control+Shift+v');await newNote('异步粘贴保护');
   await page.waitForTimeout(550);assert.equal((await page.locator('.tiptap').innerText()).trim(),'');
   await instance.evaluate(({clipboard})=>{clipboard.readText=globalThis.__readText;});checks.push('异步读取剪贴板期间换记录不会串写');
-  await page.getByLabel('搜索记录').fill('搜索框输入');await writeClipboard('剪贴板保留');await page.keyboard.press('Control+Shift+c');assert.equal((await readClipboard()).text,'剪贴板保留');
+  await page.keyboard.press('Control+f');await page.getByLabel('搜索记录').fill('搜索框输入');await writeClipboard('剪贴板保留');await page.keyboard.press('Control+Shift+c');assert.equal((await readClipboard()).text,'剪贴板保留');
   await page.getByLabel('清除搜索').click();checks.push('快捷键仅作用于正文');
+  if(!await page.getByLabel('搜索记录').isVisible())await page.getByRole('button',{name:'显示记录列表',exact:true}).click();
   await page.locator('.note-card').filter({hasText:'尚未等待保存的标题'}).click();await page.locator('.tiptap h2').waitFor();
   assert.equal(await page.getByRole('button',{name:'撤销 Ctrl+Z'}).isEnabled(),false);checks.push('新建及切换记录不会带入其他记录的撤销历史');
   await page.getByLabel('记录标题').fill('随手摘录 · 纯文本操作');
@@ -132,7 +133,7 @@ try{
   await page.getByRole('button',{name:'进入专注模式'}).click();await page.screenshot({path:path.join(root,'04-focus.png')});
   await page.getByRole('button',{name:'退出专注模式'}).click();
   await page.getByRole('button',{name:'更多记录操作',exact:true}).click();await page.getByRole('button',{name:'移到回收站',exact:true}).click();
-  await page.getByRole('button',{name:'回收站',exact:true}).click();await page.locator('.tiptap h2').waitFor();await selectText('.tiptap strong');
+  await page.getByRole('button',{name:'回收站',exact:true}).click();await page.locator('.note-card').first().click();await page.locator('.tiptap h2').waitFor();await selectText('.tiptap strong');
   await menuAction('复制为纯文本');await page.locator('.tiptap strong').click({button:'right'});await until(async()=>(await readClipboard()).text==='保留灵感');
   const readonlyMenu=await instance.evaluate(()=>globalThis.__menuItems);assert.equal(readonlyMenu.find(i=>i.label==='粘贴为纯文本').enabled,false);
   checks.push('回收站允许纯文本复制，禁止粘贴');

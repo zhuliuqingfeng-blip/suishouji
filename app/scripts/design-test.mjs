@@ -6,7 +6,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 process.chdir(appRoot);
-const root=path.join(testRoot,'design-'+Date.now()),shots=path.join(testRoot,'design-1.3');
+const root=path.join(testRoot,'design-'+Date.now()),shots=path.join(testRoot,'design-1.4');
 await fs.mkdir(root,{recursive:true});await fs.mkdir(shots,{recursive:true});
 const store=new Store(root);
 const p=text=>({type:'paragraph',content:[{type:'text',text}]}),h=text=>({type:'heading',attrs:{level:2},content:[{type:'text',text}]});
@@ -34,57 +34,45 @@ async function resize(width,height){await app.evaluate(({BrowserWindow},{width,h
 async function geometry(){
  const result=await page.evaluate(()=>{
    const failures=[];
-   for(const selector of ['.workspace-header','.toolbar','.editor-footer','.selection-bar']){
-     const parent=document.querySelector(selector);if(!parent||!parent.checkVisibility())continue;
+   for(const selector of ['.app-navigation','.collection-tools','.document-command','.toolbar','.app-status','.selection-bar']){
+     const parent=document.querySelector(selector);if(!parent?.checkVisibility()||getComputedStyle(parent).visibility==='hidden')continue;
      const box=parent.getBoundingClientRect();
      for(const child of parent.querySelectorAll('button,input,select')){
-       if(!child.checkVisibility())continue;
-       const b=child.getBoundingClientRect();
+       if(!child.checkVisibility())continue;const b=child.getBoundingClientRect();
        if(b.left<box.left-1||b.right>box.right+1||b.top<box.top-1||b.bottom>box.bottom+1)failures.push(`${selector}: ${child.getAttribute('aria-label')||child.textContent}`);
        if(b.top>=0&&b.bottom<=innerHeight){const hit=document.elementFromPoint(b.x+b.width/2,b.y+b.height/2);if(hit!==child&&!child.contains(hit))failures.push(`按钮被遮挡: ${child.getAttribute('aria-label')||child.textContent}`);}
      }
    }
-   if(document.documentElement.scrollWidth>innerWidth)failures.push('窗口出现横向溢出');
+   if(document.documentElement.scrollWidth>innerWidth)failures.push('窗口横向溢出');
    return failures;
  });assert.deepEqual(result,[]);
 }
+async function openDirectory(){if(!await page.getByLabel('搜索记录').isVisible())await page.getByRole('button',{name:'显示记录列表',exact:true}).click();}
+async function back(){await page.getByRole('button',{name:'返回手记库',exact:true}).click();await page.locator('.library-mode').waitFor();}
 try{
  app=await electron.launch({executablePath:process.env.NOTES_PACKAGED_EXE||electronPath,args:process.env.NOTES_PACKAGED_EXE?[]:[appRoot],env:{...process.env,NOTES_TEST_MODE:'1',NOTES_DATA_DIR:root}});
- page=await app.firstWindow();page.on('pageerror',e=>errors.push(e.message));await page.getByLabel('记录标题').waitFor();await ready();await resize(1260,820);
- await geometry();await shot('01-记录工作区');
- // All menus must remain above adjacent panel stacking contexts and sticky tools.
- await page.getByRole('button',{name:'数据与设置',exact:true}).click();
- await page.getByRole('button',{name:'使用说明与数据位置',exact:true}).click();await page.getByRole('dialog',{name:'使用说明',exact:true}).waitFor();await shot('02-使用说明');await page.keyboard.press('Escape');
- await page.getByRole('button',{name:'更多记录操作',exact:true}).click();await shot('03-记录菜单');await page.keyboard.press('Escape');
- await page.getByRole('button',{name:'多选',exact:true}).click();await page.getByRole('button',{name:'全选当前结果',exact:true}).click();assert.equal(await page.locator('.note-checkbox:checked').count(),6);await geometry();await shot('04-多选');await page.keyboard.press('Escape');
- await page.getByRole('button',{name:'收起导航栏',exact:true}).click();await geometry();await shot('05-导航收起');await page.getByRole('button',{name:'展开导航栏',exact:true}).click();
- await resize(920,650);await geometry();await shot('06-窄窗口');
- await page.getByRole('button',{name:'多选',exact:true}).click();await geometry();await page.keyboard.press('Escape');
- await page.getByRole('button',{name:'回收站',exact:true}).click();await page.locator('.trash-banner').waitFor();await geometry();await shot('07-回收站');
- await page.getByRole('button',{name:'全部记录',exact:true}).click();await ready();
+ page=await app.firstWindow();page.on('pageerror',e=>errors.push(e.message));await page.locator('.library-mode').waitFor();await ready();await resize(1260,820);
+ await geometry();await shot('01-整页手记库');assert.equal(await page.locator('.note-card').count(),6);assert.equal(await page.locator('.editor-panel').isVisible(),false);
+ await page.getByLabel('标签筛选',{exact:true}).getByRole('button',{name:/^生活/}).click();await page.waitForFunction(()=>document.querySelectorAll('.note-card').length===3);await page.getByLabel('记录列表',{exact:true}).focus();await page.keyboard.press('Control+a');assert.equal(await page.locator('.note-checkbox:checked').count(),3);await geometry();await shot('02-筛选与批量操作');await page.keyboard.press('Escape');
+ await page.getByLabel('标签筛选',{exact:true}).getByRole('button',{name:'全部',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.note-card').length===6);
+ await page.locator(`[data-note-id="${ids.at(-1)}"] .note-card`).click();await page.locator('.document-mode').waitFor();await ready();assert.equal(await page.locator('.notes-panel').isVisible(),false);await geometry();await shot('03-独立书写页');
+ await page.getByRole('button',{name:'更多记录操作',exact:true}).click();await shot('04-记录菜单');await page.keyboard.press('Escape');
+ await page.getByRole('button',{name:'数据与设置',exact:true}).click();await page.getByRole('button',{name:'使用说明与数据位置',exact:true}).click();await page.getByRole('dialog',{name:'使用说明',exact:true}).waitFor();await shot('05-使用说明');await page.keyboard.press('Escape');
+ await openDirectory();await geometry();await shot('06-按需记录目录');
+ const handle=page.getByRole('separator',{name:'记录列表宽度'});await handle.focus();await page.keyboard.press('End');await resize(920,650);assert.ok((await page.locator('.editor-panel').boundingBox()).width>=400);await geometry();await shot('07-窄窗口与目录');await handle.dblclick();assert.equal(Number(await handle.getAttribute('aria-valuenow')),350);
+ await page.getByRole('button',{name:'收起标签筛选',exact:true}).click();assert.equal(await page.getByLabel('标签筛选',{exact:true}).isVisible(),false);await page.getByRole('button',{name:'展开标签筛选',exact:true}).click();
  await page.locator(`[data-note-id="${ids[4]}"] .note-card`).click();await ready();
- await page.getByRole('textbox',{name:'记录正文'}).focus();await page.keyboard.press('Control+End');
- const sticky=await page.evaluate(()=>{const bar=document.querySelector('.toolbar').getBoundingClientRect(),scroll=document.querySelector('.editor-scroll');return {top:bar.top,scrollTop:scroll.getBoundingClientRect().top,scrolled:scroll.scrollTop};});
- assert.ok(sticky.scrolled>400);assert.ok(Math.abs(sticky.top-sticky.scrollTop)<2,'长文格式栏应停留在编辑区域顶部');await geometry();await shot('08-长文工具栏');
- await page.getByRole('button',{name:'加粗 Ctrl+B',exact:true}).click();await page.keyboard.insertText(' 加粗验收');await page.keyboard.press('Control+s');await page.locator('.tiptap strong').filter({hasText:'加粗验收'}).waitFor();
- for(let i=0;i<20;i++)await page.keyboard.press('ArrowUp');
- await page.keyboard.insertText('光标可见');
- const caret=await page.evaluate(()=>{const sel=getSelection();const range=sel.getRangeAt(0).cloneRange();return {y:range.getBoundingClientRect().top,bar:document.querySelector('.toolbar').getBoundingClientRect().bottom};});assert.ok(caret.y>=caret.bar,'输入光标不能被固定工具栏挡住');
- await page.getByRole('button',{name:'进入专注模式',exact:true}).click();await geometry();await page.evaluate(()=>document.querySelector('.editor-scroll').scrollTop=0);await shot('09-专注模式');
- await page.getByRole('button',{name:'退出专注模式',exact:true}).click();await resize(1260,820);
- await page.getByRole('button',{name:'回收站',exact:true}).click();await ready();await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:1});});
- await page.getByRole('button',{name:'清空回收站',exact:true}).click();await page.locator('.welcome').waitFor();await geometry();await shot('10-空回收站');
- await page.getByRole('button',{name:'全部记录',exact:true}).click();await ready();
- await page.getByLabel('搜索记录').fill('没有匹配的内容');await page.waitForFunction(()=>document.querySelectorAll('.note-card').length===0);await geometry();await shot('11-搜索空结果');
- // Verify actual text contrast instead of pinning the test to a color value.
+ const before=(await page.locator('.toolbar').boundingBox()).y;await page.getByRole('textbox',{name:'记录正文'}).focus();await page.keyboard.press('Control+End');assert.ok(await page.locator('.editor-scroll').evaluate(n=>n.scrollTop)>400);assert.ok(Math.abs((await page.locator('.toolbar').boundingBox()).y-before)<1);await geometry();await shot('08-长文与常驻工具');
+ await page.getByRole('button',{name:'加粗 Ctrl+B',exact:true}).click();await page.keyboard.insertText(' 加粗验收');await page.locator('.tiptap strong').filter({hasText:'加粗验收'}).waitFor();for(let i=0;i<20;i++)await page.keyboard.press('ArrowUp');await page.keyboard.insertText('光标可见');
+ const caret=await page.evaluate(()=>({y:getSelection().getRangeAt(0).getBoundingClientRect().top,bar:document.querySelector('.toolbar').getBoundingClientRect().bottom}));assert.ok(caret.y>=caret.bar);
+ await page.getByRole('button',{name:'进入专注模式',exact:true}).click();assert.equal(await page.getByLabel('主导航',{exact:true}).isVisible(),false);await geometry();await page.evaluate(()=>document.querySelector('.editor-scroll').scrollTop=0);await shot('09-专注书写');
+ await page.keyboard.press('Control+f');await page.waitForFunction(()=>document.querySelector('[aria-label="搜索记录"]')===document.activeElement);assert.equal(await page.getByLabel('主导航',{exact:true}).isVisible(),true);
+ await back();await resize(1260,820);await page.getByRole('button',{name:'回收站',exact:true}).click();await ready();await page.locator('.note-card').first().click();await page.locator('.trash-banner').waitFor();await geometry();await shot('10-回收站只读页');assert.equal(await page.getByRole('textbox',{name:'记录正文'}).getAttribute('contenteditable'),'false');await back();
+ await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:1});});await page.getByRole('button',{name:'清空回收站',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.note-card').length===0);await geometry();await shot('11-空回收站');
+ await page.getByRole('button',{name:'全部记录',exact:true}).click();await ready();await page.getByLabel('搜索记录').fill('没有匹配的内容');await page.waitForFunction(()=>document.querySelectorAll('.note-card').length===0);await geometry();await shot('12-搜索空结果');await page.getByLabel('清除搜索').click();await ready();await page.locator('.note-card').first().click();await ready();
  const contrasts=await page.evaluate(()=>{
-   const rgb=s=>s.match(/[\d.]+/g).map(Number),luminance=c=>c.slice(0,3).map(v=>v/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4).reduce((n,v,i)=>n+v*[.2126,.7152,.0722][i],0);
-   return ['.sidebar-hint','.brand-sub','.new-button','.search-box input','.tiptap','.save-state','.record-meta','.record-type','.card-date','.list-footer','.attachment-hint'].flatMap(selector=>{
-     const el=document.querySelector(selector);if(!el)return [];
-     const foreground=rgb(getComputedStyle(el).color);let bg=[255,255,255],parent=el;
-     while(parent){const c=rgb(getComputedStyle(parent).backgroundColor);if(c.length===3||c[3]===1){bg=c;break;}parent=parent.parentElement;}
-     const a=luminance(foreground),b=luminance(bg);return [{selector,ratio:(Math.max(a,b)+.05)/(Math.min(a,b)+.05)}];
-   });
+   const rgb=s=>s.match(/[\d.]+/g).map(Number),lum=c=>c.slice(0,3).map(v=>v/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4).reduce((n,v,i)=>n+v*[.2126,.7152,.0722][i],0);
+   return ['.app-brand','.new-button','.tiptap','.save-state','.record-type','.page-details dd','.page-details dt','.attachment-hint','.app-status'].flatMap(selector=>{const el=document.querySelector(selector);if(!el?.checkVisibility())return[];const fg=rgb(getComputedStyle(el).color);let bg=[255,255,255],parent=el;while(parent){const c=rgb(getComputedStyle(parent).backgroundColor);if(c.length===3||c[3]===1){bg=c;break;}parent=parent.parentElement;}const a=lum(fg),b=lum(bg);return[{selector,ratio:(Math.max(a,b)+.05)/(Math.min(a,b)+.05)}];});
  });for(const {selector,ratio}of contrasts)assert.ok(ratio>=4.5,`${selector} 对比度 ${ratio}`);
- assert.deepEqual(errors,[]);console.log(JSON.stringify({passed:true,checks:['常规与920px窄窗口','顶部操作与工具栏按钮无溢出或遮挡','多选与回收站','导航折叠','专注恢复','长文工具栏固定与编辑','菜单跨栏层级','搜索空状态','主要文字对比度'],screenshots:shots},null,2));
-}catch(error){if(page)await shot('failure').catch(()=>{});throw error;}finally{if(app)await app.close();}
+ await page.keyboard.press('Control+s');assert.deepEqual(errors,[]);console.log(JSON.stringify({passed:true,checks:['整页资料索引与独立书写场景','标签筛选及范围多选','常驻格式工具和光标可见','可调整宽度的按需目录','920px窄窗口操作无溢出或遮挡','主导航与目录的专注恢复','Ctrl+F跨场景搜索','菜单及说明','回收站只读及空状态','搜索空结果','主要文字对比度'],screenshots:shots},null,2));
+}catch(error){if(page&&!page.isClosed())await shot('failure').catch(()=>{});throw error;}finally{if(app)await app.close();}

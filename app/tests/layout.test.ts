@@ -2,11 +2,11 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {DEFAULT_LAYOUT,fitPanels,normalizeLayout,rangeSelection} from '../src/layout.js';
 import {fitWindow} from '../electron/window-state.js';
-test('窄窗口保留正文空间，折叠和专注不丢失用户宽度',()=>{
- const p=normalizeLayout({...DEFAULT_LAYOUT,navWidth:300,listWidth:480});const actual=fitPanels(p,904);
- assert.ok(904-actual.nav-actual.list-actual.navHandle-actual.listHandle>=400);assert.equal(p.listWidth,480);
- assert.equal(fitPanels({...p,navCollapsed:true},1260).nav,64);assert.equal(fitPanels({...p,listHidden:true},1260).list,0);
- assert.deepEqual(fitPanels({...p,focused:true},1260),{nav:0,list:0,navHandle:0,listHandle:0});assert.equal(normalizeLayout({navWidth:10,listWidth:999}).navWidth,180);
+test('手记库使用整页，书写目录可收起和专注，窄窗口保留正文空间及偏好宽度',()=>{
+ const p=normalizeLayout({...DEFAULT_LAYOUT,view:'document',indexHidden:false,indexWidth:520});const actual=fitPanels(p,904);
+ assert.ok(904-actual.index-actual.handle>=400);assert.equal(p.indexWidth,520);
+ assert.equal(fitPanels({...p,view:'library'},1260).index,0);assert.equal(fitPanels({...p,indexHidden:true},1260).index,0);
+ assert.deepEqual(fitPanels({...p,focused:true},1260),{index:0,handle:0});assert.equal(normalizeLayout({indexWidth:999}).indexWidth,520);
 });
 test('连续多选按当前顺序添加，普通选择可取消且不会重复',()=>{
  const range=rangeSelection(['a','b','c','d'],new Set(['a']),'c','a',true);assert.deepEqual([...range],['a','b','c']);

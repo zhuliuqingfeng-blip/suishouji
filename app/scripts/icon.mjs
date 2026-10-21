@@ -1,17 +1,26 @@
 import fs from 'node:fs/promises';
-import { deflateSync } from 'node:zlib';
+import path from 'node:path';
+import {_electron as electron} from 'playwright';
+import electronPath from 'electron';
 import pngToIco from 'png-to-ico';
-const n=256, data=Buffer.alloc((n*4+1)*n);
-function line(x,y,x1,y1,x2,y2,w){const dx=x2-x1,dy=y2-y1,t=Math.max(0,Math.min(1,((x-x1)*dx+(y-y1)*dy)/(dx*dx+dy*dy)));return (x-x1-t*dx)**2+(y-y1-t*dy)**2<w*w;}
-for(let y=0;y<n;y++)for(let x=0;x<n;x++){
- const at=y*(n*4+1)+1+x*4, r=45, cx=Math.max(r,Math.min(n-r-1,x)),cy=Math.max(r,Math.min(n-r-1,y));
- let rgba=(x-cx)**2+(y-cy)**2<=r*r?[32,43,61,255]:[0,0,0,0];
- if((x>=67&&x<=173&&y>=56&&y<=198&&(x<74||x>166||y<63||y>191))||line(x,y,88,85,145,85,3)||line(x,y,88,110,145,110,3)||line(x,y,88,135,119,135,3))rgba=[250,246,239,255];
- if(line(x,y,133,171,190,114,8)||line(x,y,129,177,136,159,4))rgba=[241,193,167,255];
- for(let c=0;c<4;c++)data[at+c]=rgba[c];
-}
-function crc(b){let c=0xffffffff;for(const v of b){c^=v;for(let i=0;i<8;i++)c=(c>>>1)^((c&1)?0xedb88320:0);}return (c^0xffffffff)>>>0;}
-function chunk(name,bytes){const type=Buffer.from(name),len=Buffer.alloc(4),check=Buffer.alloc(4);len.writeUInt32BE(bytes.length);check.writeUInt32BE(crc(Buffer.concat([type,bytes])));return Buffer.concat([len,type,bytes,check]);}
-const header=Buffer.alloc(13);header.writeUInt32BE(n,0);header.writeUInt32BE(n,4);header[8]=8;header[9]=6;
-const png=Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),chunk('IHDR',header),chunk('IDAT',deflateSync(data)),chunk('IEND',Buffer.alloc(0))]);
-await fs.mkdir('assets',{recursive:true});await fs.writeFile('assets/icon.png',png);await fs.writeFile('assets/icon.ico',await pngToIco(png));
+import {appRoot,repoRoot,testRoot} from './paths.mjs';
+// The SVG is shared by in-app branding and all native icon sizes.
+const svg=await fs.readFile(path.join(appRoot,'assets/icon.svg'),'utf8');
+const env={...process.env,NOTES_ICON_CACHE_DIR:path.join(repoRoot,'.cache','icon-render')};delete env.ELECTRON_RUN_AS_NODE;
+let instance;
+try{
+ instance=await electron.launch({executablePath:electronPath,args:[path.join(appRoot,'scripts/icon-render.cjs')],env,timeout:15000});
+ const page=await instance.firstWindow();
+ const sizes=[16,20,24,32,40,48,64,128,256,512];
+ const images=await page.evaluate(async({svg,sizes})=>{
+   const img=new Image();img.src='data:image/svg+xml;base64,'+btoa(svg);await img.decode();
+   const output={};for(const size of sizes){const canvas=document.createElement('canvas');canvas.width=size;canvas.height=size;canvas.getContext('2d').drawImage(img,0,0,size,size);output[size]=canvas.toDataURL('image/png').split(',')[1];}
+   const canvas=document.createElement('canvas');canvas.width=800;canvas.height=420;const ctx=canvas.getContext('2d');
+   for(const [y,bg,fg]of [[0,'#f8f7f3','#60547f'],[210,'#51436c','#e7ddef']]){ctx.fillStyle=bg;ctx.fillRect(0,y,800,210);ctx.fillStyle=fg;ctx.font='14px "Segoe UI"';ctx.fillText(y===0?'LIGHT / WINDOWS DESKTOP':'DARK / TASKBAR',26,y+30);let x=30;for(const size of [16,24,32,48,64,128]){ctx.drawImage(img,x,y+52+(128-size)/2,size,size);ctx.fillText(size+' px',x,y+197);x+=size+40;}}
+   output.preview=canvas.toDataURL('image/png').split(',')[1];return output;
+ },{svg,sizes});
+ await fs.writeFile(path.join(appRoot,'assets/icon.png'),Buffer.from(images[512],'base64'));
+ await fs.writeFile(path.join(appRoot,'assets/icon.ico'),await pngToIco(sizes.filter(n=>n<=256).map(n=>Buffer.from(images[n],'base64'))));
+ await fs.mkdir(testRoot,{recursive:true});await fs.writeFile(path.join(testRoot,'icon-preview.png'),Buffer.from(images.preview,'base64'));
+ console.log('Generated SVG-based PNG and ICO sizes: '+sizes.filter(n=>n<=256).join(', '));
+}finally{if(instance)await instance.close();}

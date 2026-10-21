@@ -50,7 +50,7 @@ try {
   await page.keyboard.press('Control+s'); await page.waitForTimeout(650);
   await page.evaluate(()=>{document.querySelector('.editor-scroll').scrollTop=0;});
   await page.screenshot({path:path.join(screenshotDir,'02-note.png')});
-  await page.getByLabel('搜索记录').fill('周末清单'); await page.waitForTimeout(350); assert.equal(await page.locator('.note-card').count(),1);
+  await page.keyboard.press('Control+f');await page.getByLabel('搜索记录').fill('周末清单'); await page.waitForTimeout(350); assert.equal(await page.locator('.note-card').count(),1);
   await page.getByLabel('清除搜索').click();
   const all=await page.evaluate(()=>window.notes.list({})); assert.equal(all.length,1); assert.equal(all[0].pinned,true);
   const noteId=all[0].id;
@@ -59,8 +59,8 @@ try {
   await page.getByLabel('网页地址').fill('https://example.com'); await page.getByRole('button',{name:'确定',exact:true}).click();
   await page.keyboard.insertText('一个网页'); await page.keyboard.press('Control+s'); await page.waitForTimeout(650);
   await page.getByRole('button',{name:'更多记录操作',exact:true}).click(); await page.getByRole('button',{name:'移到回收站',exact:true}).click();
-  await page.getByRole('button',{name:/回收站/}).first().click(); await page.getByRole('button',{name:'恢复记录',exact:true}).click();
-  await page.getByRole('button',{name:/全部记录/}).first().click(); await page.getByLabel('记录标题').waitFor();
+  await page.getByRole('button',{name:/回收站/}).first().click();await page.locator('.note-card').first().click(); await page.getByRole('button',{name:'恢复记录',exact:true}).click();
+  await page.getByRole('button',{name:/全部记录/}).first().click();await page.locator('.note-card').first().click(); await page.getByLabel('记录标题').waitFor();
   const backup=path.join(root,'完整备份.zip');
   await application.evaluate(({dialog},file)=>{dialog.showSaveDialog=async()=>({canceled:false,filePath:file});},backup);
   await page.getByRole('button',{name:'数据与设置',exact:true}).click(); await page.getByRole('button',{name:'备份全部数据',exact:true}).click();
@@ -77,6 +77,7 @@ try {
   // Switching immediately after editing must flush the draft as well.
   await page.getByRole('button',{name:/新建记录/}).first().click();
   await page.getByLabel('记录标题').fill('快速切换保存验收'); await body.fill('刚输入就切换到另一条记录。');
+  await page.keyboard.press('Control+f');
   await page.locator('.note-card').filter({hasText:'把零散的想法，收进这一页'}).click();
   await waitUntil(()=>page.evaluate(async()=> (await window.notes.list({})).some(n=>n.title==='快速切换保存验收'&&n.plainText.includes('刚输入'))));
   await page.evaluate(async()=>{const n=(await window.notes.list({})).find(n=>n.title==='快速切换保存验收');await window.notes.trash(n.id);await window.notes.remove(n.id);});

@@ -1,25 +1,21 @@
 import { useEffect,useRef,useState,type CSSProperties } from 'react';
-export interface LayoutPreferences { navWidth:number;listWidth:number;navCollapsed:boolean;listHidden:boolean;focused:boolean }
+export interface LayoutPreferences { view:'library'|'document';indexWidth:number;indexHidden:boolean;filtersCollapsed:boolean;focused:boolean }
 const clamp=(n:number,min:number,max:number)=>Math.min(max,Math.max(min,n));
-export const DEFAULT_LAYOUT:LayoutPreferences={navWidth:214,listWidth:306,navCollapsed:false,listHidden:false,focused:false};
+export const DEFAULT_LAYOUT:LayoutPreferences={view:'library',indexWidth:350,indexHidden:true,filtersCollapsed:false,focused:false};
 export function normalizeLayout(input:Partial<LayoutPreferences>|null):LayoutPreferences {
-  const value=input??{};return {navWidth:clamp(Number(value.navWidth)||214,180,300),listWidth:clamp(Number(value.listWidth)||306,240,480),navCollapsed:value.navCollapsed===true,listHidden:value.listHidden===true,focused:value.focused===true};
+  const p=input??{};return {view:p.view==='document'?'document':'library',indexWidth:clamp(Number(p.indexWidth)||350,280,520),indexHidden:p.indexHidden!==false,filtersCollapsed:p.filtersCollapsed===true,focused:p.focused===true};
 }
 export function fitPanels(p:LayoutPreferences,width:number){
-  let nav=p.focused?0:p.navCollapsed?64:p.navWidth,list=p.focused||p.listHidden?0:p.listWidth;
-  const navHandle=nav&&!p.navCollapsed?6:0,listHandle=list?6:0;
-  let overflow=Math.max(0,nav+list+navHandle+listHandle+400-width);
-  if(list){const shrink=Math.min(overflow,list-240);list-=shrink;overflow-=shrink;}
-  if(nav&&!p.navCollapsed)nav-=Math.min(overflow,nav-180);
-  return {nav,list,navHandle,listHandle};
+  const index=p.view==='document'&&!p.indexHidden&&!p.focused?Math.min(p.indexWidth,Math.max(280,width-448)):0;
+  return {index,handle:index?8:0};
 }
 export function usePanels(){
-  const [preferences,setPreferences]=useState(()=>{try{return normalizeLayout(JSON.parse(localStorage.getItem('suishouji:layout')??'null'));}catch{return {...DEFAULT_LAYOUT};}});
+  const [preferences,setPreferences]=useState(()=>{try{return normalizeLayout(JSON.parse(localStorage.getItem('suishouji:workspace:v2')??'null'));}catch{return {...DEFAULT_LAYOUT};}});
   const [width,setWidth]=useState(window.innerWidth);
   useEffect(()=>{const resize=()=>setWidth(window.innerWidth);window.addEventListener('resize',resize);return()=>window.removeEventListener('resize',resize);},[]);
-  useEffect(()=>{try{localStorage.setItem('suishouji:layout',JSON.stringify(preferences));}catch{}},[preferences]);
+  useEffect(()=>{try{localStorage.setItem('suishouji:workspace:v2',JSON.stringify(preferences));}catch{}},[preferences]);
   const sizes=fitPanels(preferences,width);
-  const style:CSSProperties={gridTemplateColumns:`${sizes.nav}px ${sizes.navHandle}px ${sizes.list}px ${sizes.listHandle}px minmax(0,1fr)`};
+  const style:CSSProperties={'--index-width':`${sizes.index}px`,'--index-handle':`${sizes.handle}px`} as CSSProperties;
   return {preferences,setPreferences,sizes,style};
 }
 export function Splitter({name,value,min,max,reset,hidden,onChange}:{name:string;value:number;min:number;max:number;reset:number;hidden:boolean;onChange:(n:number)=>void}){
