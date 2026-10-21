@@ -97,7 +97,9 @@ kbd {
   gap:10px;
   flex-shrink:0;
   background:none;
-  padding:0
+  padding:0;
+  cursor:default;
+  user-select:none
 }
 .app-brand img {
   width:28px;
