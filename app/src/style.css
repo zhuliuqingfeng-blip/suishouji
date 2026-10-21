@@ -110,14 +110,6 @@ kbd {
   font-weight:600;
   letter-spacing:2px
 }
-.app-brand>span {
-  margin-left:8px;
-  border-left:1px solid #d9d3df;
-  padding-left:16px;
-  font-size:10px;
-  color:var(--muted);
-  letter-spacing:1px
-}
 .space-tabs {
   height:100%;
   display:flex;
@@ -1457,9 +1449,6 @@ kbd {
   .app-navigation {
     gap:26px;
     padding-inline:25px
-  }
-  .app-brand>span {
-    display:none
   }
   .collection-heading {
     padding:30px 36px 24px

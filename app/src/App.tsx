@@ -309,7 +309,7 @@ export default function App() {
   </div>;
   return <div className={`app-shell ${inLibrary?'library-mode':'document-mode'} ${layout.focused?'is-focused':''} ${layout.filtersCollapsed?'filters-collapsed':''} ${compactLibrary?'library-compact':''}`} style={layoutStyle} onClick={()=>{if(menu)setMenu(false);if(noteMenu)setNoteMenu(false);if(context)setContext(null);}}>
     <header className="app-navigation" aria-label="主导航">
-      <div className="app-brand"><img src={appMark} alt="" draggable={false}/><strong>随手记</strong><span>本地手记</span></div>
+      <div className="app-brand"><img src={appMark} alt="" draggable={false}/><strong>随手记</strong></div>
       <nav className="space-tabs" aria-label="记录空间">
         <button aria-label="全部记录" aria-current={!trash?'page':undefined} className={!trash?'current':''} disabled={blocked} onClick={()=>void changeView(false,'',true)}>手记库 <small>{overview.active}</small></button>
         <button aria-label="回收站" aria-current={trash?'page':undefined} className={trash?'current':''} disabled={blocked} onClick={()=>void changeView(true,'',true)}>回收站{overview.trash>0&&<small>{overview.trash}</small>}</button>
