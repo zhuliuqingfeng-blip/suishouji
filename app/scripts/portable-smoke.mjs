@@ -26,7 +26,7 @@ try{
   await moveFolder(original,moved);activeFolder=moved;page=await launch(moved);
   const after=await page.evaluate(()=>window.notes.info());assert.equal(after.dataDir,path.join(moved,'我的数据'));
   const detail=await page.evaluate(id=>window.notes.get(id),note.id);assert.equal(detail.note.title,'整套文件夹搬迁验收');
-  await page.locator('.note-card').first().click();await page.locator('.tiptap img').waitFor();await page.waitForFunction(()=>document.querySelector('.tiptap img')?.naturalWidth>0);
+  await page.getByRole('button',{name:'全部记录',exact:true}).click();await page.locator('.note-card').first().click();await page.locator('.tiptap img').waitFor();await page.waitForFunction(()=>document.querySelector('.tiptap img')?.naturalWidth>0);
   assert.equal((await fs.readdir(path.join(moved,'我的数据','自动备份'))).filter(n=>n.endsWith('.zip')).length,7);
   await page.screenshot({path:path.resolve(testRoot,'04-portable-moved.png')});
   await instance.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:1,checkboxChecked:false});});

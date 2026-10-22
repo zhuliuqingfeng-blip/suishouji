@@ -29,7 +29,7 @@ async function dailyBackup() {
   const file = `自动备份-${dateStamp()}.zip`;
   if (!archives.includes(file)) { await createBackup(store, path.join(directory, file)); archives.push(file); }
   for (const name of archives.sort().slice(0, -7)) await fsp.rm(path.join(directory, name));
-  lastBackup = dateStamp();
+  lastBackup = (await fsp.stat(path.join(directory,file))).mtime.toISOString();
 }
 const methods: Record<string, (...args: any[]) => unknown> = {
   list: (f: Filter) => store.list(f), overview: () => store.overview(), create: () => store.create(), get: (id: string) => store.get(id), save: (input: NoteInput) => store.save(input),
@@ -73,7 +73,7 @@ const methods: Record<string, (...args: any[]) => unknown> = {
     if (picked.canceled || !picked.filePath) return null;
     const destination = path.resolve(picked.filePath), relative = path.relative(dataDir, destination);
     if (relative === 'notes.sqlite' || relative.startsWith(`attachments${path.sep}`) || relative.startsWith(`.运行缓存${path.sep}`)) throw new Error('请选择一个单独的备份位置，避免覆盖正在使用的数据文件');
-    await exclusive(() => createBackup(store, picked.filePath!)); lastBackup = new Date().toLocaleString('zh-CN'); return picked.filePath;
+    await exclusive(() => createBackup(store, picked.filePath!)); lastBackup = new Date().toISOString(); return picked.filePath;
   },
   restoreBackup: async () => {
     const picked = await dialog.showOpenDialog(win!, { title: '选择随手记备份', filters: [{ name: '随手记备份', extensions: ['zip'] }], properties: ['openFile'] });

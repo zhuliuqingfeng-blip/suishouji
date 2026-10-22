@@ -9,13 +9,15 @@ import appMark from '../assets/icon.svg';
 import type { AppInfo, Attachment, Filter, Note, NoteDetail, NoteSummary, Overview, RichNode,SortOrder,TextMenuAction } from '../electron/shared';
 import {usePanels,Splitter,LibraryHeightSplitter,LIBRARY_HEADER,rangeSelection} from './layout';
 import {insertPlainText,notePlainText,plainText} from './plain-text';
+import {Home} from './Home';
+import {noteTitle} from './home-model';
 
 const LocalImage = Image.extend({
   addAttributes() { return { ...this.parent?.(), assetId: { default: null }, width: { default: 560, renderHTML: attrs => ({ width: attrs.width, style: `max-width:100%;width:${attrs.width}px;height:auto` }) } }; }
 });
 const formatDate = (date: string) => new Date(date).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
 const fullDate = (date: string) => new Date(date).toLocaleString('zh-CN', { hour12: false });
-const titleFor = (n: { title: string; plainText: string }) => n.title.trim() || n.plainText.trim().split('\n')[0]?.slice(0, 60) || '未命名记录';
+const titleFor = noteTitle;
 const sizeFor = (n: number) => n < 1024 ? `${n} B` : n < 1024 ** 2 ? `${(n/1024).toFixed(0)} KB` : `${(n/1024**2).toFixed(1)} MB`;
 const emptyOverview: Overview = { active: 0, trash: 0, tags: [] };
 const filterKey=(filter:Filter)=>JSON.stringify([filter.query??'',filter.tag??'',!!filter.trash,filter.sort??'updated']);
@@ -26,6 +28,8 @@ function IconButton({ title, active, disabled, onClick, children }: { title: str
 export default function App() {
   const api = window.notes;
   const [list, setList] = useState<NoteSummary[]>([]), [overview, setOverview] = useState<Overview>(emptyOverview);
+  const [homeNotes,setHomeNotes]=useState<NoteSummary[]>([]),[homeLoaded,setHomeLoaded]=useState(false);
+  const [lastOpened,setLastOpened]=useState(()=>localStorage.getItem('suishouji:last-note'));
   const [listFilterKey,setListFilterKey]=useState('');
   const [detail, setDetail] = useState<NoteDetail | null>(null), [query, setQuery] = useState(''), [tag, setTag] = useState(''), [trash, setTrash] = useState(false);
   const [status, setStatus] = useState<'saved'|'dirty'|'saving'|'error'>('saved'), [operation, setOperation] = useState(false), [switching, setSwitching] = useState(true), [importing, setImporting] = useState(false);
@@ -139,12 +143,13 @@ export default function App() {
     // Each record has its own editing session. setContent alone keeps undo
     // history, which could otherwise restore a previous record into this one.
     if (editor) editor.view.updateState(EditorState.create({ schema:editor.schema, doc:editor.state.doc, plugins:editor.state.plugins }));
-    if (next && !next.note.deletedAt) localStorage.setItem('suishouji:last-note', next.note.id);
   }
+  function rememberOpened(next:NoteDetail|null){if(next&&!next.note.deletedAt){localStorage.setItem('suishouji:last-note',next.note.id);setLastOpened(next.note.id);}}
   async function refresh() {
     const sequence = ++listRequest.current; const f = { ...filterRef.current };
-    const [rows, counts] = await Promise.all([api.list(f), api.overview()]);
-    if (sequence === listRequest.current) { setList(rows); setOverview(counts);setListFilterKey(filterKey(f)); }
+    const rowsTask=api.list(f);
+    const [rows, counts,allNotes] = await Promise.all([rowsTask,api.overview(),!f.trash&&!f.query&&!f.tag?rowsTask:api.list({sort:'updated'})]);
+    if (sequence === listRequest.current) { setList(rows); setOverview(counts);setListFilterKey(filterKey(f));setHomeNotes(allNotes);setHomeLoaded(true); }
     return rows;
   }
   function markChanged(change: Partial<Note>) {
@@ -173,34 +178,44 @@ export default function App() {
     saveQueue.current = task; return task;
   }
   flushRef.current = flush;
-  async function selectNote(id: string) {
+  async function selectNote(id: string,allRecords=false) {
     if (blocked) return false;
-    if (id === current.current?.note.id) return true;
+    if (id === current.current?.note.id&&!allRecords) return true;
     setSwitching(true); const seq = ++selectVersion.current;
-    try { if (!await flush()) return false; const next = await api.get(id); if (seq === selectVersion.current) {showDetail(next);return true;} }
+    try { if (!await flush()) return false; const next = await api.get(id);if(allRecords){if(next.note.deletedAt){await refresh();throw new Error('这条记录已移入回收站，请到回收站查看');}setTrash(false);setTag('');setQuery('');filterRef.current={trash:false,tag:'',query:'',sort};await refresh();} if (seq === selectVersion.current) {showDetail(next);return true;} }
     catch (e) { report(e); } finally { setSwitching(false); }
     return false;
   }
-  async function openNote(id:string){if(await selectNote(id))setLayout(p=>({...p,view:'document'}));}
+  async function openNote(id:string,allRecords=layout.view==='home'){if(await selectNote(id,allRecords)){rememberOpened(current.current);setLayout(p=>({...p,view:'document',focused:false}));}}
   async function openLibrary(){if(blocked||!await flush())return;clearSelection();setLayout(p=>({...p,view:'library',focused:false}));}
+  async function openHome(){
+    if(blocked)return;setSwitching(true);
+    try{if(!await flush())return;clearSelection();setContext(null);setNoteMenu(false);setLayout(p=>({...p,view:'home',focused:false}));setInfo(await api.info());}catch(e){report(e);}finally{setSwitching(false);}
+  }
   async function newNote() {
     if (blocked) return;
     clearSelection();setContext(null);
     if (tagInput.trim()) commitTag();
     if (current.current && !current.current.note.deletedAt && !current.current.note.title.trim() && editor?.isEmpty && !current.current.attachments.length && !current.current.note.tags.length) {
-      setQuery('');searchPending.current=false;focusEditor.current=layout.view!=='document'||layout.focused;setLayout(p=>({...p,view:'document',focused:false}));editor.view.focus(); return;
+      setTrash(false);setTag('');setQuery('');filterRef.current={trash:false,tag:'',query:'',sort};rememberOpened(current.current);searchPending.current=false;focusEditor.current=layout.view!=='document'||layout.focused;setLayout(p=>({...p,view:'document',focused:false}));editor.view.focus();void refresh().catch(report);return;
     }
     setSwitching(true);
     try { if (!await flush()) return; setTrash(false); setTag(''); setQuery(''); filterRef.current = { trash:false, tag:'', query:'',sort }; showDetail(await api.create()); await refresh();
       // Focus before enabling the UI. A delayed focus can steal the first title keystrokes.
-      focusEditor.current=true;setLayout(p=>({...p,view:'document',focused:false}));editor?.setEditable(true, false); editor?.commands.setTextSelection(0); editor?.view.focus(); }
+      rememberOpened(current.current);focusEditor.current=true;setLayout(p=>({...p,view:'document',focused:false}));editor?.setEditable(true, false); editor?.commands.setTextSelection(0); editor?.view.focus(); }
     catch (e) { report(e); } finally { setSwitching(false); }
   }
   newNoteAction.current = () => { void newNote(); };
   async function changeView(nextTrash: boolean, nextTag = '',browse=false) {
     if (blocked) return; setSwitching(true);
-    try { if (!await flush()) return; clearSelection();setTrash(nextTrash); setTag(nextTag); setQuery(''); filterRef.current = { trash:nextTrash, tag:nextTag, query:'',sort }; const rows = await refresh(); showDetail(rows[0] ? await api.get(rows[0].id) : null);if(browse)setLayout(p=>({...p,view:'library',focused:false})); }
+    try { if (!await flush()) return false; clearSelection();setTrash(nextTrash); setTag(nextTag); setQuery(''); filterRef.current = { trash:nextTrash, tag:nextTag, query:'',sort }; const rows = await refresh(); showDetail(rows[0] ? await api.get(rows[0].id) : null);if(browse)setLayout(p=>({...p,view:'library',focused:false}));return true; }
     catch (e) { report(e); } finally { setSwitching(false); }
+  }
+  async function searchRecords(){
+    if(blocked)return;focusEditor.current=false;
+    if(layout.view==='home'){searchPending.current=true;if(!await changeView(false,'',true))searchPending.current=false;}
+    else if(layout.view==='document'&&(layout.focused||layout.indexHidden)){searchPending.current=true;setLayout(p=>({...p,focused:false,indexHidden:false}));}
+    else{searchInput.current?.focus();searchInput.current?.select();}
   }
   async function act(action: () => Promise<unknown>, success?: string, reload = false) {
     if (blocked) return; setSwitching(true); setMenu(false); setNoteMenu(false);setContext(null);
@@ -270,14 +285,14 @@ export default function App() {
   }
   useEffect(() => {
     if (!editor || initialized.current) return; initialized.current = true;
-    void (async () => { try { const appInfo = await api.info(); setInfo(appInfo); if (appInfo.backupWarning) notify(appInfo.backupWarning, true); const rows = await refresh(); const last = rows.find(n => n.id === localStorage.getItem('suishouji:last-note')) ?? rows[0]; if (last) showDetail(await api.get(last.id)); } catch (e) { report(e); } finally { setSwitching(false); } })();
+    void (async () => { try { const appInfo = await api.info(); setInfo(appInfo); if (appInfo.backupWarning) notify(appInfo.backupWarning, true); const rows = await refresh(); const last = rows.find(n => n.id === localStorage.getItem('suishouji:last-note')); if (last) showDetail(await api.get(last.id)); } catch (e) { report(e); } finally { setSwitching(false); } })();
   }, [editor]);
   useEffect(() => { const timer = setTimeout(() => { void refresh().catch(report); }, 150); return () => clearTimeout(timer); }, [query,sort]);
   useEffect(()=>{clearSelection();setContext(null);},[query,tag,trash]);
   useEffect(()=>{const visible=new Set(list.map(n=>n.id));setChecked(previous=>{const next=new Set([...previous].filter(id=>visible.has(id)));return next.size===previous.size?previous:next;});},[list]);
   useEffect(()=>{localStorage.setItem('suishouji:sort',sort);anchor.current=null;},[sort]);
   useEffect(()=>{if(!undo)return;const tick=()=>{const seconds=Math.max(0,Math.ceil((undo.expiresAt-Date.now())/1000));setUndoSeconds(seconds);if(!seconds)setUndo(null);};tick();const timer=setInterval(tick,250);return()=>clearInterval(timer);},[undo]);
-  useLayoutEffect(()=>{if(searchPending.current){searchPending.current=false;focusEditor.current=false;searchInput.current?.focus();searchInput.current?.select();return;}if(focusEditor.current&&layout.view==='document'&&!switching){focusEditor.current=false;editor?.view.focus();}},[layout.focused,layout.indexHidden,layout.view,switching,editor]);
+  useLayoutEffect(()=>{if(searchPending.current&&layout.view!=='home'&&!switching){searchPending.current=false;focusEditor.current=false;searchInput.current?.focus();searchInput.current?.select();return;}if(focusEditor.current&&layout.view==='document'&&!switching){focusEditor.current=false;editor?.view.focus();}},[layout.focused,layout.indexHidden,layout.view,switching,editor]);
   useEffect(()=>{if(!context)return;const close=()=>setContext(null);window.addEventListener('resize',close);listArea.current?.addEventListener('scroll',close);return()=>{window.removeEventListener('resize',close);listArea.current?.removeEventListener('scroll',close);};},[context]);
   useEffect(() => {
     const offClose = api.onCloseRequested(() => { void (async () => { if (await flushRef.current()) await api.readyToClose(); })(); });
@@ -292,27 +307,29 @@ export default function App() {
         const key = e.key.toLowerCase();
         if (key === 's') { e.preventDefault(); void flushRef.current(); }
         if (!help && linkValue === null && !zoom && key === 'n') { e.preventDefault(); newNoteAction.current(); }
-        if (!help && linkValue === null && !zoom && key === 'f') { e.preventDefault();focusEditor.current=false;if(layout.view==='document'&&(layout.focused||layout.indexHidden)){searchPending.current=true;setLayout(p=>({...p,focused:false,indexHidden:false}));}else{searchInput.current?.focus();searchInput.current?.select();} }
+        if (!help && linkValue === null && !zoom && key === 'f') { e.preventDefault();void searchRecords(); }
       }
       if (e.key === 'Escape') { setZoom(null); setHelp(false); setLinkValue(null); setMenu(false); setNoteMenu(false);setContext(null);if(!help&&linkValue===null&&!zoom)clearSelection(); if (!help && linkValue === null && !zoom && document.activeElement === searchInput.current) setQuery(''); }
     };
     window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key);
-  }, [help, linkValue, zoom,layout.focused,layout.indexHidden,layout.view]);
+  }, [help, linkValue, zoom,layout.focused,layout.indexHidden,layout.view,blocked]);
 
   const note = detail?.note, files = detail?.attachments.filter(a => a.kind === 'file') ?? [];
-  const inLibrary=layout.view==='library',indexVisible=inLibrary||(!layout.indexHidden&&!layout.focused);
+  const resumeNote=homeNotes.find(n=>n.id===lastOpened);
+  const inHome=layout.view==='home',inLibrary=layout.view==='library',inDocument=layout.view==='document',indexVisible=inLibrary||(inDocument&&!layout.indexHidden&&!layout.focused);
   const compactLibrary=layout.libraryHeaderHeight<=LIBRARY_HEADER.compactBelow;
   const saveStatus=<div className={`save-state ${status}`} role="status" aria-live="polite">
     {operation||importing||status==='saving'?<LoaderCircle size={13} className="spin"/>:status==='error'?<CircleAlert size={13}/>:<Check size={13}/>}
     <span>{operation?'正在处理数据…':importing?'正在保存附件…':status==='saved'?'所有更改已保存':status==='dirty'?'等待保存…':status==='saving'?'正在保存…':'保存失败'}</span>
     {status==='error'&&<button onClick={()=>void flush()}>重试保存</button>}
   </div>;
-  return <div className={`app-shell ${inLibrary?'library-mode':'document-mode'} ${layout.focused?'is-focused':''} ${layout.filtersCollapsed?'filters-collapsed':''} ${compactLibrary?'library-compact':''}`} style={layoutStyle} onClick={()=>{if(menu)setMenu(false);if(noteMenu)setNoteMenu(false);if(context)setContext(null);}}>
+  return <div className={`app-shell ${inHome?'home-mode':inLibrary?'library-mode':'document-mode'} ${inDocument&&layout.focused?'is-focused':''} ${layout.filtersCollapsed?'filters-collapsed':''} ${compactLibrary?'library-compact':''}`} style={layoutStyle} onClick={()=>{if(menu)setMenu(false);if(noteMenu)setNoteMenu(false);if(context)setContext(null);}}>
     <header className="app-navigation" aria-label="主导航">
       <div className="app-brand"><img src={appMark} alt="" draggable={false}/><strong>随手记</strong></div>
       <nav className="space-tabs" aria-label="记录空间">
-        <button aria-label="全部记录" aria-current={!trash?'page':undefined} className={!trash?'current':''} disabled={blocked} onClick={()=>void changeView(false,'',true)}>手记库 <small>{overview.active}</small></button>
-        <button aria-label="回收站" aria-current={trash?'page':undefined} className={trash?'current':''} disabled={blocked} onClick={()=>void changeView(true,'',true)}>回收站{overview.trash>0&&<small>{overview.trash}</small>}</button>
+        <button aria-label="首页" aria-current={inHome?'page':undefined} className={inHome?'current':''} disabled={blocked} onClick={()=>void openHome()}>首页</button>
+        <button aria-label="全部记录" aria-current={!inHome&&!trash?'page':undefined} className={!inHome&&!trash?'current':''} disabled={blocked} onClick={()=>void changeView(false,'',true)}>手记库 <small>{overview.active}</small></button>
+        <button aria-label="回收站" aria-current={!inHome&&trash?'page':undefined} className={!inHome&&trash?'current':''} disabled={blocked} onClick={()=>void changeView(true,'',true)}>回收站{overview.trash>0&&<small>{overview.trash}</small>}</button>
       </nav>
       <div className="navigation-tools">
         <button className="new-button" aria-label="新建记录" title="新建记录 Ctrl+N" disabled={blocked} onClick={()=>void newNote()}><Plus size={17}/><span>新建记录</span><kbd>Ctrl N</kbd></button>
@@ -329,11 +346,12 @@ export default function App() {
       </div>
     </header>
     <div className="workbench">
+      {inHome&&<Home notes={homeNotes} overview={overview} lastId={lastOpened} info={info} busy={blocked} loaded={homeLoaded} onOpen={id=>void openNote(id)} onNew={()=>void newNote()} onBrowse={tag=>void changeView(false,tag??'',true)} onSearch={()=>void searchRecords()} onTrash={()=>void changeView(true,'',true)} onBackup={()=>void act(()=>api.backup(),'备份已保存，可将备份复制到U盘')} onRetry={()=>void openHome()}/>}
       <section className="notes-panel" aria-label={inLibrary?'手记库':'记录目录'} hidden={!indexVisible}>
         <div className="collection-heading" ref={libraryHeading}>
           <div><div className="section-overline">{trash?'已删除的记录':'文字 · 图片 · 文件'}</div><h1 title={tag||undefined}>{trash?'回收站':tag?tag:'手记库'}<span>{list.length} 条记录</span></h1><p>{trash?'留在这里，仍然可以找回。':'把值得留下的，放在一起。'}</p></div>
           {!inLibrary&&<div className="index-heading-actions"><IconButton title="展开手记库" onClick={()=>void openLibrary()}><Maximize2 size={16}/></IconButton><IconButton title="关闭记录目录" onClick={()=>setLayout(p=>({...p,indexHidden:true}))}><X size={17}/></IconButton></div>}
-          {inLibrary&&note&&<button className="resume-note" disabled={blocked} onClick={()=>void openNote(note.id)}><span>继续上次的记录</span><strong>{titleFor(note)}</strong><ArrowUpRight size={18}/></button>}
+          {inLibrary&&!trash&&resumeNote&&<button className="resume-note" disabled={blocked} onClick={()=>void openNote(resumeNote.id,true)}><span>继续上次的记录</span><strong>{titleFor(resumeNote)}</strong><ArrowUpRight size={18}/></button>}
         </div>
         <div className="collection-tools">
           <div className="search-box"><Search size={17}/><input ref={searchInput} aria-label="搜索记录" placeholder="查找标题、正文或文件…" value={query} disabled={blocked} onChange={e=>setQuery(e.target.value)}/>{query?<button aria-label="清除搜索" onClick={()=>setQuery('')}><X size={15}/></button>:<kbd>Ctrl F</kbd>}</div>
@@ -363,8 +381,8 @@ export default function App() {
         </div>
         <footer className="index-footer"><span>{query?`“${query}” 的搜索结果`:tag?`标签：${tag}`:trash?'回收站中的记录可恢复':'你的资料只保存在这台电脑'}</span><span>{list.length} 条</span></footer>
       </section>
-      <Splitter name="记录列表宽度" value={sizes.index} min={280} max={520} reset={350} hidden={inLibrary||!sizes.handle} onChange={indexWidth=>setLayout(p=>({...p,indexWidth}))}/>
-      <main className="editor-panel" hidden={inLibrary} onDragOver={e=>{if(e.dataTransfer.types.includes('Files'))e.preventDefault();}} onDrop={e=>{if((e.target as HTMLElement).closest('.tiptap'))return;if(e.dataTransfer.files.length){e.preventDefault();ingest([...e.dataTransfer.files],false);}}}>
+      <Splitter name="记录列表宽度" value={sizes.index} min={280} max={520} reset={350} hidden={!inDocument||!sizes.handle} onChange={indexWidth=>setLayout(p=>({...p,indexWidth}))}/>
+      <main className="editor-panel" hidden={!inDocument} onDragOver={e=>{if(e.dataTransfer.types.includes('Files'))e.preventDefault();}} onDrop={e=>{if((e.target as HTMLElement).closest('.tiptap'))return;if(e.dataTransfer.files.length){e.preventDefault();ingest([...e.dataTransfer.files],false);}}}>
         <header className="document-command" aria-label="记录操作">
           <div className="document-navigation"><button className="back-library" aria-label="返回手记库" disabled={blocked} onClick={()=>void openLibrary()}><ArrowLeft size={15}/><span>手记库</span></button><span className="command-divider"/><IconButton title={layout.focused||layout.indexHidden?'显示记录列表':'隐藏记录列表'} active={!layout.indexHidden&&!layout.focused} onClick={()=>setLayout(p=>({...p,focused:false,indexHidden:p.focused?false:!p.indexHidden}))}><PanelLeft size={17}/></IconButton><IconButton title={layout.focused?'退出专注模式':'进入专注模式'} active={layout.focused} onClick={()=>setLayout(p=>({...p,focused:!p.focused}))}><Focus size={17}/></IconButton></div>
           <div className="editor-actions">{note&&!note.deletedAt&&<button className="attachment-trigger" aria-label="添加图片或文件" disabled={blocked} onClick={()=>void pickFiles()}><Plus size={14}/><span>图片 / 文件</span></button>}{note&&(note.deletedAt?<button className="restore-button" disabled={blocked} onClick={()=>void batchAction('restore',[note.id])}><RotateCcw size={15}/>恢复记录</button>:<IconButton title={note.pinned?'取消置顶':'置顶记录'} active={note.pinned} disabled={blocked} onClick={()=>void act(async()=>{await api.pin(note.id,!note.pinned);const next=await api.get(note.id);current.current=next;setDetail(next);})}><Pin size={16}/></IconButton>)}
@@ -389,7 +407,7 @@ export default function App() {
         </>:<div className="document-empty"><span className="section-overline">书写页</span><h2>准备记点什么？</h2><p>从手记库选择一条记录，或新建一页。</p><button onClick={()=>void newNote()} disabled={blocked}>新建记录 <ArrowRight size={16}/></button></div>}
       </main>
     </div>
-    <footer className="app-status"><span><HardDrive size={12}/><span>本地存储</span><b>·</b>{inLibrary?'手记库':layout.focused?'专注书写':'书写页'}</span>{saveStatus}<span className="status-hint">{inLibrary?'Ctrl N 新建 · Ctrl F 查找':note?.deletedAt?'回收站 · 只读':`${note?.plainText.replace(/\s/g,'').length??0} 字 · Ctrl S 保存`}</span></footer>
+    <footer className="app-status"><span><HardDrive size={12}/><span>本地存储</span><b>·</b>{inHome?'首页':inLibrary?'手记库':layout.focused?'专注书写':'书写页'}</span>{saveStatus}<span className="status-hint">{inHome||inLibrary?'Ctrl N 新建 · Ctrl F 查找':note?.deletedAt?'回收站 · 只读':`${note?.plainText.replace(/\s/g,'').length??0} 字 · Ctrl S 保存`}</span></footer>
 
     {context&&<div className="dropdown context-menu" role="menu" aria-label="记录右键菜单" style={{left:Math.max(8,context.x),top:Math.max(8,context.y)}} onClick={e=>e.stopPropagation()} onKeyDown={e=>{if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();const buttons=[...e.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')],at=buttons.indexOf(document.activeElement as HTMLButtonElement);buttons[(at+(e.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length]?.focus();}}}>
       {!trash&&context.ids.length===1&&<><button role="menuitem" onClick={()=>contextPin(context.ids[0])}><Pin/>{list.find(n=>n.id===context.ids[0])?.pinned?'取消置顶':'置顶记录'}</button><button role="menuitem" onClick={()=>void act(()=>api.exportNotes(context.ids[0]),'记录已导出')}><Upload/>导出记录</button></>}
@@ -403,20 +421,21 @@ export default function App() {
     {zoom && <div className="image-modal" role="dialog" aria-label="查看图片" onClick={() => setZoom(null)}><button aria-label="关闭图片"><X size={24}/></button><img src={zoom} alt="记录中的图片"/><span>点击任意位置或按 Esc 关闭</span></div>}
     {linkValue !== null && <div className="modal-backdrop" onClick={() => setLinkValue(null)}><div className="help-dialog" role="dialog" aria-label="插入网页链接" onClick={e => e.stopPropagation()}><button className="modal-close" aria-label="关闭链接设置" onClick={() => setLinkValue(null)}><X size={19}/></button><h2>添加一个网页链接</h2><p>输入 http:// 或 https:// 开头的网址。留空可以移除当前链接。</p><form className="link-form" onSubmit={e => { e.preventDefault(); const href = linkValue.trim(); if (!href) editor?.chain().focus().extendMarkRange('link').unsetLink().run(); else if (/^https?:\/\//i.test(href)) editor?.chain().focus().extendMarkRange('link').setLink({href}).run(); else { notify('请输入 http:// 或 https:// 开头的网页地址', true); return; } setLinkValue(null); }}><input aria-label="网页地址" autoFocus value={linkValue} onChange={e => setLinkValue(e.target.value)}/><button type="submit">确定</button></form></div></div>}
     {help && <div className="modal-backdrop" onClick={() => setHelp(false)}><div className="help-dialog" role="dialog" aria-label="使用说明" onClick={e => e.stopPropagation()}>
-      <button className="modal-close" aria-label="关闭说明" onClick={() => setHelp(false)}><X size={19}/></button><img className="help-brand" src={appMark} alt=""/><h2>从资料库，到书写页。</h2>
+      <button className="modal-close" aria-label="关闭说明" onClick={() => setHelp(false)}><X size={19}/></button><img className="help-brand" src={appMark} alt=""/><h2>从首页，慢慢开始。</h2>
       <p>点击新建，直接输入。文字自动保存；截图可以粘贴，图片和文件可以拖入。标签输入后按回车即可添加。</p>
       <div className="shortcut-help"><span><kbd>Ctrl N</kbd> 新建记录</span><span><kbd>Ctrl F</kbd> 搜索记录</span><span><kbd>Ctrl S</kbd> 立即保存</span></div>
       <p>选中正文后按 <strong>Ctrl+Shift+C</strong> 复制为纯文本，按 <strong>Ctrl+Shift+V</strong> 粘贴为纯文本；也可右键正文或点击工具栏“纯文本”。去掉来源格式并保留换行，粘贴位置已有的段落或列表布局会保留。记录右上角“更多记录操作”可复制全文纯文本，包含标题和正文，不包含图片及附件。原有 Ctrl+C / Ctrl+V 保留格式复制和粘贴。</p>
       <p>列表上方点击“多选”，或按住 Ctrl 点击记录。Shift 点击连续选择；全选只选中当前筛选结果。在列表中按 Delete 可以删除所选记录，输入文字时仍按正常文字编辑处理。</p>
       <p>移入回收站后，右下角有 10 秒“撤销”。回收站可批量恢复或永久删除；右键记录也有常用操作。</p>
-      <p>顶部“手记库”和“回收站”用于切换记录空间。手记库按行展示记录，点击一行进入书写页；左上角“手记库”可返回完整索引。标签筛选、排序和多选位于索引上方。</p>
+      <p>每次打开先进入首页，查看最近更新、资料近况和上次打开的记录；不会自动新建空白页。顶部“首页”“手记库”和“回收站”用于切换空间。首页按Ctrl+F可进入手记库并聚焦搜索；书写页点击“首页”会先完成保存。</p>
+      <p>手记库按行展示记录，点击一行进入书写页；左上角“手记库”可返回完整索引。标签筛选、排序和多选位于索引上方。首页的“近7天有更新”按本地日期统计今天及前六天，最近更新按实际修改时间排列，不受置顶、搜索或标签筛选影响。</p>
       <p>手记库表头下方的分隔线可上下拖动，向上压缩标题区即可看到更多记录；双击恢复默认，也可用上下方向键调整。“紧凑视图”一次缩小标题区及行距，点击“舒展视图”还原。搜索、筛选和表头保持可用，选择会自动记住。</p>
-      <p>书写页上方的目录按钮可打开记录目录；拖动目录右边的分隔线调整宽度，双击恢复默认。专注模式隐藏顶部导航和目录，再次点击恢复。Ctrl+F 自动打开目录并聚焦搜索。场景、目录宽度、筛选收起状态、排序和窗口大小都会记住。</p>
-      <p>再次打开会回到上次查看的记录。连续点击新建时，会继续使用当前的空白记录。</p>
+      <p>书写页上方的目录按钮可打开记录目录；拖动目录右边的分隔线调整宽度，双击恢复默认。专注模式隐藏顶部导航和目录，再次点击恢复。Ctrl+F 自动打开目录并聚焦搜索。目录宽度、筛选收起状态、排序和窗口大小都会记住。</p>
+      <p>再次打开先到首页，点击“继续上次”回到上次主动打开的有效记录。连续点击新建时，会继续使用当前的空白记录。</p>
       <p>关闭窗口就会退出软件。换电脑前，先关闭软件，再复制<strong>整个软件文件夹</strong>，包含里面的“我的数据”。</p>
       <p>每天首次打开时自动备份，保留最近七份。也可以在“数据与设置”中手动备份到U盘。恢复前会校验文件，并备份现有记录。</p>
       <p>导出后，双击“打开我的记录.html”即可用浏览器查看。搜索范围为标题、正文、标签和附件名称。</p>
-      <div className="data-location"><span>你的数据位置</span><code>{info?.dataDir}</code><button onClick={() => void api.openDataDir().catch(report)}><FolderOpen size={14}/>打开文件夹</button></div><small>随手记 {info?.version} · {info?.lastBackup ? `最近备份：${info.lastBackup}` : '尚无手动备份'}</small>
+      <div className="data-location"><span>你的数据位置</span><code>{info?.dataDir}</code><button onClick={() => void api.openDataDir().catch(report)}><FolderOpen size={14}/>打开文件夹</button></div><small>随手记 {info?.version} · {info?.lastBackup ? `最近备份：${fullDate(info.lastBackup)}` : '暂无备份'}</small>
     </div></div>}
   </div>;
 }

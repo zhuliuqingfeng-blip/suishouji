@@ -16,7 +16,7 @@ store.close();
 let app,page;const errors=[];
 async function launch(){
  app=await electron.launch({executablePath:process.env.NOTES_PACKAGED_EXE||electronPath,args:process.env.NOTES_PACKAGED_EXE?[]:[appRoot],env:{...process.env,NOTES_TEST_MODE:'1',NOTES_DATA_DIR:root}});
- page=await app.firstWindow();page.on('pageerror',e=>errors.push(e.message));await page.locator('.library-mode').waitFor();await page.waitForFunction(()=>!document.querySelector('[aria-label="新建记录"]').disabled);
+ page=await app.firstWindow();page.on('pageerror',e=>errors.push(e.message));await page.locator('.home-mode').waitFor();await page.waitForFunction(()=>!document.querySelector('[aria-label="新建记录"]').disabled);await page.getByRole('button',{name:'全部记录',exact:true}).click();await page.locator('.library-mode').waitFor();await page.waitForFunction(()=>!document.querySelector('[aria-label="新建记录"]').disabled);
 }
 async function close(){const closed=app.waitForEvent('close');await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].close());await closed;app=null;}
 async function settled(){await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));}

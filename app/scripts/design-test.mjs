@@ -51,7 +51,7 @@ async function openDirectory(){if(!await page.getByLabel('搜索记录').isVisib
 async function back(){await page.getByRole('button',{name:'返回手记库',exact:true}).click();await page.locator('.library-mode').waitFor();}
 try{
  app=await electron.launch({executablePath:process.env.NOTES_PACKAGED_EXE||electronPath,args:process.env.NOTES_PACKAGED_EXE?[]:[appRoot],env:{...process.env,NOTES_TEST_MODE:'1',NOTES_DATA_DIR:root}});
- page=await app.firstWindow();page.on('pageerror',e=>errors.push(e.message));await page.locator('.library-mode').waitFor();await ready();await resize(1260,820);
+ page=await app.firstWindow();page.on('pageerror',e=>errors.push(e.message));await page.locator('.home-mode').waitFor();await ready();await page.getByRole('button',{name:'全部记录',exact:true}).click();await page.locator('.library-mode').waitFor();await ready();await resize(1260,820);
  await geometry();await shot('01-整页手记库');assert.equal(await page.locator('.note-card').count(),6);assert.equal(await page.locator('.editor-panel').isVisible(),false);
  await page.getByLabel('标签筛选',{exact:true}).getByRole('button',{name:/^生活/}).click();await page.waitForFunction(()=>document.querySelectorAll('.note-card').length===3);await page.getByLabel('记录列表',{exact:true}).focus();await page.keyboard.press('Control+a');assert.equal(await page.locator('.note-checkbox:checked').count(),3);await geometry();await shot('02-筛选与批量操作');await page.keyboard.press('Escape');
  await page.getByLabel('标签筛选',{exact:true}).getByRole('button',{name:'全部',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.note-card').length===6);

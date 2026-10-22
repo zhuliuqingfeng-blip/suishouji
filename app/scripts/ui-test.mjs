@@ -11,10 +11,11 @@ const root=path.resolve(testRoot,'ui-'+Date.now()); await fs.mkdir(root,{recursi
 const dataDir=path.join(root,'我的数据'); const screenshotDir=testRoot;
 const executablePath=process.env.NOTES_PACKAGED_EXE || electronPath;
 const args=process.env.NOTES_PACKAGED_EXE ? [] : ['.'];
-const errors=[]; let application;
+const errors=[]; let application,previousClipboard;
 async function waitUntil(predicate,timeout=10000){const start=Date.now();while(!await predicate()){if(Date.now()-start>timeout)throw new Error('数据验证等待超时');await new Promise(r=>setTimeout(r,50));}}
 async function launch(data=dataDir){
   const instance=await electron.launch({executablePath,args,env:{...process.env,NOTES_TEST_MODE:'1',NOTES_DATA_DIR:data},timeout:30000});
+  if(previousClipboard===undefined)previousClipboard=await instance.evaluate(async({clipboard})=>Promise.all((await clipboard.read()).map(async item=>Object.fromEntries(await Promise.all(item.types.map(async type=>[type,Array.from(new Uint8Array(await (await item.getType(type)).arrayBuffer()))]))))));
   // Check attachment-open routing without leaving external apps or Explorer windows behind.
   await instance.evaluate(({shell})=>{globalThis.__openedFile=null;shell.openPath=async file=>{if(file.endsWith('.txt')){const fs=process.getBuiltinModule('fs');globalThis.__openedFile={file,text:fs.readFileSync(file,'utf8')};}return '';};});
   const page=await instance.firstWindow(); page.on('pageerror',e=>errors.push(e.message)); await page.waitForFunction(()=>!!window.notes,{timeout:20000}); await page.getByRole('button',{name:/新建记录/}).first().waitFor();
@@ -86,6 +87,7 @@ try {
   await application.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].close());
   await application.waitForEvent('close',{timeout:10000}); application=null;
   first=await launch();application=first.instance;page=first.page;
+  await page.getByRole('button',{name:'继续上次记录',exact:true}).click();
   await page.waitForFunction(()=>document.querySelector('[aria-label="记录标题"]')?.value==='关闭前的中文修改');
   assert.equal((await page.evaluate(id=>window.notes.get(id),noteId)).attachments.length,2);
   // No external resources can be loaded in the running app.
@@ -93,8 +95,12 @@ try {
   await application.close(); application=null;
   const moved=path.join(root,'搬迁后的数据');await fs.rename(dataDir,moved);
   first=await launch(moved);application=first.instance;page=first.page;
+  await page.getByRole('button',{name:'继续上次记录',exact:true}).click();
   await page.locator('.tiptap img').waitFor(); await page.waitForFunction(()=>document.querySelector('.tiptap img')?.naturalWidth>0);
   await page.getByTitle('打开 周末清单.txt').waitFor();
   assert.deepEqual(errors,[]); await page.screenshot({path:path.join(screenshotDir,'03-moved.png')});
   console.log(JSON.stringify({passed:true,executablePath,dataDir:moved,checks:['中文编辑','标签置顶','真实剪贴板图片','附件副本','搜索','图文链接','回收站恢复','ZIP备份恢复','HTML导出','关闭前保存','离线限制','搬迁后图片附件'],screenshots:['01-empty.png','02-note.png','03-moved.png']},null,2));
-} catch(error) { if(application) {const p=await application.firstWindow();await p.screenshot({path:path.join(screenshotDir,'failure.png')}).catch(()=>{});console.error((await p.locator('body').innerText()).slice(-2500));}throw error; } finally {if(application)await application.close();}
+} catch(error) { if(application) {const p=await application.firstWindow();await p.screenshot({path:path.join(screenshotDir,'failure.png')}).catch(()=>{});console.error((await p.locator('body').innerText()).slice(-2500));}throw error; } finally {
+  try{if(previousClipboard!==undefined){if(!application)application=(await launch()).instance;await application.evaluate(async({clipboard,ClipboardItem},items)=>{if(items.length)await clipboard.write(items.map(item=>new ClipboardItem(Object.fromEntries(Object.entries(item).map(([type,bytes])=>[type,new Blob([new Uint8Array(bytes)],{type})])))));else await clipboard.clear();},previousClipboard);}}
+  finally{if(application)await application.close();}
+}

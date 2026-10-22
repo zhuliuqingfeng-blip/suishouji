@@ -35,6 +35,6 @@ try{
  await page.keyboard.press('Control+s');await until(()=>page.evaluate(async()=> (await window.notes.list({})).some(n=>n.title==='下次打开，从这里继续')));
  await page.getByRole('button',{name:'插入网页链接',exact:true}).click();await page.getByRole('dialog',{name:'插入网页链接',exact:true}).waitFor();await page.keyboard.press('Escape');assert.equal(await page.getByRole('dialog').count(),0);
  const closed=instance.waitForEvent('close');await instance.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].close());await closed;instance=null;
- await launch();await until(async()=>await page.getByLabel('记录标题').inputValue()==='下次打开，从这里继续');
+ await launch();await page.locator('.home-mode').waitFor();await page.getByRole('button',{name:'继续上次记录',exact:true}).click();await until(async()=>await page.getByLabel('记录标题').inputValue()==='下次打开，从这里继续');
  console.log(JSON.stringify({passed:true,version:await page.evaluate(async()=>(await window.notes.info()).version),checks:['导航文字对比度','正文字号16px','Ctrl+N新建','空白记录复用','Ctrl+F搜索','Esc清空搜索','顶部图片文件入口','记住上次未置顶记录','Esc关闭链接对话框']},null,2));
 }catch(error){if(page)await page.screenshot({path:path.resolve(testRoot,'ux-failure.png')}).catch(()=>{});throw error;}finally{if(instance)await instance.close();}

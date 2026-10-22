@@ -24,7 +24,7 @@ async function ready(){await until(()=>page.getByRole('button',{name:/新建记�
 async function undo(){await page.getByRole('button',{name:/^撤销 \d+s$/}).click();await until(async()=>await page.locator('.undo-toast').count()===0);await ready();}
 async function close(){const end=instance.waitForEvent('close');await instance.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].close());await end;instance=null;}
 try{
- await launch();await page.getByLabel('记录排序').selectOption('title');await until(async()=>await card(ids[0]).count()===1);
+ await launch();await page.getByRole('button',{name:'全部记录',exact:true}).click();await page.locator('.note-card').first().click();await directory();await page.getByLabel('记录排序').selectOption('title');await until(async()=>await card(ids[0]).count()===1);
  const original=await page.getByLabel('记录标题').inputValue();
  await card(ids[0]).click({modifiers:['Control']});await card(ids[2]).click({modifiers:['Shift']});assert.equal(await page.locator('.note-checkbox:checked').count(),3);assert.equal(await page.getByLabel('记录标题').inputValue(),original);
  await page.keyboard.press('Escape');await card(ids[0]).click({modifiers:['Control']});await page.getByRole('checkbox',{name:'选择 C 项目',exact:true}).click({modifiers:['Shift']});assert.equal(await page.locator('.note-checkbox:checked').count(),3);
@@ -49,7 +49,7 @@ try{
  await page.getByLabel('记录标题').focus();await page.keyboard.press('Control+a');assert.equal(await page.locator('.selection-bar').count(),0);
  const expectedBounds=await instance.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].getNormalBounds());
  await page.getByRole('button',{name:'收起标签筛选',exact:true}).click();await page.getByRole('button',{name:'隐藏记录列表',exact:true}).first().click();await close();await launch();
- assert.equal(await page.locator('.notes-panel').isVisible(),false);assert.equal(await page.locator('.editor-panel').isVisible(),true);
+ await page.locator('.home-mode').waitFor();await page.getByRole('button',{name:'继续上次记录',exact:true}).click();assert.equal(await page.locator('.notes-panel').isVisible(),false);assert.equal(await page.locator('.editor-panel').isVisible(),true);
  const bounds=await instance.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].getNormalBounds());assert.ok(Math.abs(bounds.width-expectedBounds.width)<=2,`窗口宽度 ${bounds.width}，预期 ${expectedBounds.width}`);assert.ok(Math.abs(bounds.height-expectedBounds.height)<=2);await page.keyboard.press('Control+f');await until(()=>page.getByLabel('搜索记录').evaluate(n=>n===document.activeElement));assert.equal(await page.getByLabel('记录排序').inputValue(),'title');
  await page.getByRole('button',{name:'展开标签筛选',exact:true}).click();
  const currentId=await page.evaluate(()=>localStorage.getItem('suishouji:last-note'));await sql(`CREATE TRIGGER stop_save BEFORE UPDATE OF title ON notes WHEN NEW.id='${currentId}' BEGIN SELECT RAISE(ABORT,'模拟保存失败'); END;`);

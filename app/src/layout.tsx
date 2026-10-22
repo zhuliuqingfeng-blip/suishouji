@@ -1,17 +1,17 @@
 import { useEffect,useLayoutEffect,useRef,useState,type CSSProperties,type RefObject } from 'react';
 export const LIBRARY_HEADER={min:56,max:240,default:166,compactBelow:110,listMin:160};
-export interface LayoutPreferences { view:'library'|'document';indexWidth:number;indexHidden:boolean;filtersCollapsed:boolean;focused:boolean;libraryHeaderHeight:number }
+export interface LayoutPreferences { view:'home'|'library'|'document';indexWidth:number;indexHidden:boolean;filtersCollapsed:boolean;focused:boolean;libraryHeaderHeight:number }
 const clamp=(n:number,min:number,max:number)=>Math.min(max,Math.max(min,n));
-export const DEFAULT_LAYOUT:LayoutPreferences={view:'library',indexWidth:350,indexHidden:true,filtersCollapsed:false,focused:false,libraryHeaderHeight:LIBRARY_HEADER.default};
+export const DEFAULT_LAYOUT:LayoutPreferences={view:'home',indexWidth:350,indexHidden:true,filtersCollapsed:false,focused:false,libraryHeaderHeight:LIBRARY_HEADER.default};
 export function normalizeLayout(input:Partial<LayoutPreferences>|null):LayoutPreferences {
-  const p=input??{};return {view:p.view==='document'?'document':'library',indexWidth:clamp(Number(p.indexWidth)||350,280,520),indexHidden:p.indexHidden!==false,filtersCollapsed:p.filtersCollapsed===true,focused:p.focused===true,libraryHeaderHeight:typeof p.libraryHeaderHeight==='number'&&Number.isFinite(p.libraryHeaderHeight)?clamp(p.libraryHeaderHeight,LIBRARY_HEADER.min,LIBRARY_HEADER.max):LIBRARY_HEADER.default};
+  const p=input??{};return {view:p.view==='document'?'document':p.view==='library'?'library':'home',indexWidth:clamp(Number(p.indexWidth)||350,280,520),indexHidden:p.indexHidden!==false,filtersCollapsed:p.filtersCollapsed===true,focused:p.focused===true,libraryHeaderHeight:typeof p.libraryHeaderHeight==='number'&&Number.isFinite(p.libraryHeaderHeight)?clamp(p.libraryHeaderHeight,LIBRARY_HEADER.min,LIBRARY_HEADER.max):LIBRARY_HEADER.default};
 }
 export function fitPanels(p:LayoutPreferences,width:number){
   const index=p.view==='document'&&!p.indexHidden&&!p.focused?Math.min(p.indexWidth,Math.max(280,width-448)):0;
   return {index,handle:index?8:0};
 }
 export function usePanels(){
-  const [preferences,setPreferences]=useState(()=>{try{return normalizeLayout(JSON.parse(localStorage.getItem('suishouji:workspace:v2')??'null'));}catch{return {...DEFAULT_LAYOUT};}});
+  const [preferences,setPreferences]=useState(()=>{try{return {...normalizeLayout(JSON.parse(localStorage.getItem('suishouji:workspace:v2')??'null')),view:'home' as const,focused:false};}catch{return {...DEFAULT_LAYOUT};}});
   const [width,setWidth]=useState(window.innerWidth);
   useEffect(()=>{const resize=()=>setWidth(window.innerWidth);window.addEventListener('resize',resize);return()=>window.removeEventListener('resize',resize);},[]);
   useEffect(()=>{try{localStorage.setItem('suishouji:workspace:v2',JSON.stringify(preferences));}catch{}},[preferences]);

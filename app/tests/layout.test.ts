@@ -6,6 +6,7 @@ test('手记库使用整页，书写目录可收起和专注，窄窗口保留�
  const p=normalizeLayout({...DEFAULT_LAYOUT,view:'document',indexHidden:false,indexWidth:520});const actual=fitPanels(p,904);
  assert.ok(904-actual.index-actual.handle>=400);assert.equal(p.indexWidth,520);
  assert.equal(fitPanels({...p,view:'library'},1260).index,0);assert.equal(fitPanels({...p,indexHidden:true},1260).index,0);
+ assert.equal(DEFAULT_LAYOUT.view,'home');assert.deepEqual(fitPanels({...p,view:'home'},1260),{index:0,handle:0});assert.equal(normalizeLayout({view:'document',indexWidth:420}).indexWidth,420);
  assert.deepEqual(fitPanels({...p,focused:true},1260),{index:0,handle:0});assert.equal(normalizeLayout({indexWidth:999}).indexWidth,520);
  assert.equal(normalizeLayout({indexWidth:400}).libraryHeaderHeight,166);assert.equal(normalizeLayout({libraryHeaderHeight:0}).libraryHeaderHeight,56);assert.equal(normalizeLayout({libraryHeaderHeight:Infinity}).libraryHeaderHeight,166);
 });
