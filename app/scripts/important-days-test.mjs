@@ -32,7 +32,7 @@ async function geometry(){assert.deepEqual(await page.evaluate(()=>{
  const failures=[];if(document.documentElement.scrollWidth>innerWidth)failures.push('页面横向溢出');
  const dialog=document.querySelector('.day-dialog');const root=dialog||document.querySelector('.important-days-page,.home-page');
  if(root.scrollWidth>root.clientWidth+1)failures.push('内容横向溢出');
- for(const el of root.querySelectorAll('button,input,select,textarea')){if(!el.checkVisibility())continue;const b=el.getBoundingClientRect();if(b.left<0||b.right>innerWidth+1)failures.push('控件超出窗口');if(b.top>=0&&b.bottom<=innerHeight){const hit=document.elementFromPoint(b.x+b.width/2,b.y+b.height/2);if(hit!==el&&!el.contains(hit))failures.push('控件被遮挡：'+(el.getAttribute('aria-label')||el.textContent));}}
+ for(const el of root.querySelectorAll('button,input,select,textarea')){if(!el.checkVisibility())continue;const b=el.getBoundingClientRect();if(b.left<0||b.right>innerWidth+1)failures.push('控件超出窗口');const body=el.closest('.day-form,.day-detail');if(body){const bounds=body.getBoundingClientRect();if(b.top<bounds.top||b.bottom>bounds.bottom)continue;}if(b.top>=0&&b.bottom<=innerHeight){const hit=document.elementFromPoint(b.x+b.width/2,b.y+b.height/2);if(hit!==el&&!el.contains(hit))failures.push('控件被遮挡：'+(el.getAttribute('aria-label')||el.textContent));}}
  return failures;
 }),[]);}
 try{

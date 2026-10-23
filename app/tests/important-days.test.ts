@@ -9,7 +9,7 @@ import {civilNumber,localDay,validateImportantDay,occurrence,orderedDays,upcomin
 import type {ImportantDay,ImportantDayInput} from '../electron/shared.js';
 import {testRoot} from '../scripts/paths.mjs';
 
-const now=new Date(2026,9,23,12),input:ImportantDayInput={name:'妈妈生日',calendar:'solar',year:null,month:11,day:5,yearly:true,reminderDays:14,note:''};
+const now=new Date(2026,9,23,12),input:ImportantDayInput={name:'妈妈生日',calendar:'solar',year:null,month:11,day:5,isLeapMonth:false,yearly:true,reminderDays:14,note:''};
 const entry=(changes:Partial<ImportantDay>={}):ImportantDay=>({...input,id:'one',createdAt:'',updatedAt:'',...changes});
 async function fixture(){await fs.mkdir(testRoot,{recursive:true});const root=await fs.mkdtemp(path.join(testRoot,'days-'));return {root,store:new Store(root)};}
 
@@ -25,7 +25,7 @@ test('日期按自然日计算，今天、明天、14天和跨年边界正确',(
 });
 test('年份可选，不重复必须有年份；无效日期、空名称和提醒范围被拒绝',()=>{
   assert.equal(validateImportantDay({...input,name:'  妈妈生日  ',year:2001}).name,'妈妈生日');
-  for(const change of [{yearly:false},{name:' '},{month:4,day:31},{month:2,day:29,year:2001},{month:0},{day:1.2},{year:0},{reminderDays:-1},{reminderDays:366},{reminderDays:NaN},{note:'字'.repeat(3001)},{calendar:'lunar'}])assert.throws(()=>validateImportantDay({...input,...change} as ImportantDayInput));
+  for(const change of [{yearly:false},{name:' '},{month:4,day:31},{month:2,day:29,year:2001},{month:0},{day:1.2},{year:0},{reminderDays:-1},{reminderDays:366},{reminderDays:NaN},{note:'字'.repeat(3001)},{calendar:'unknown'}])assert.throws(()=>validateImportantDay({...input,...change} as ImportantDayInput));
   assert.equal(validateImportantDay({...input,month:2,day:29,year:null}).day,29);
 });
 test('2月29日平年按最后一天，闰年恢复29日；低年份不会被JS映射为1900年代',()=>{

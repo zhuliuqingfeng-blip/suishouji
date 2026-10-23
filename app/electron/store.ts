@@ -51,7 +51,8 @@ export class Store {
     this.db = new DatabaseSync(this.databasePath);
     this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;');
     const version = this.db.prepare('PRAGMA user_version').get() as { user_version: number };
-    if (version.user_version > 2) { this.db.close(); throw new Error('数据来自更新版本，请使用更新的随手记打开'); }
+    if (version.user_version > 3) { this.db.close(); throw new Error('数据来自更新版本，请使用更新的随手记打开'); }
+    try {this.transaction(()=>{
     this.db.exec(`CREATE TABLE IF NOT EXISTS notes (
       id TEXT PRIMARY KEY, title TEXT NOT NULL, document TEXT NOT NULL, plainText TEXT NOT NULL,
       tags TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, pinned INTEGER NOT NULL DEFAULT 0, deletedAt TEXT);
@@ -62,24 +63,30 @@ export class Store {
       id TEXT PRIMARY KEY, name TEXT NOT NULL, calendar TEXT NOT NULL, year INTEGER, month INTEGER NOT NULL, day INTEGER NOT NULL,
       yearly INTEGER NOT NULL, reminderDays INTEGER NOT NULL, note TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS day_reminders (
-      key TEXT PRIMARY KEY, dayId TEXT NOT NULL REFERENCES important_days(id) ON DELETE CASCADE, seenAt TEXT NOT NULL);
-      PRAGMA user_version=2;`);
+      key TEXT PRIMARY KEY, dayId TEXT NOT NULL REFERENCES important_days(id) ON DELETE CASCADE, seenAt TEXT NOT NULL);`);
+    const columns=this.db.prepare('PRAGMA table_info(important_days)').all();
+    if(!columns.some(c=>c.name==='isLeapMonth'))this.db.exec('ALTER TABLE important_days ADD COLUMN isLeapMonth INTEGER NOT NULL DEFAULT 0 CHECK(isLeapMonth IN (0,1));');
+    this.db.exec('PRAGMA user_version=3;');
+    });}catch(error){this.db.close();throw error;}
     if ((this.db.prepare('PRAGMA quick_check').get() as Record<string, string>).quick_check !== 'ok') throw new Error('数据检查未通过，请从备份恢复，原数据已保留');
     this.recoverDeletions();
   }
   close() { this.db.close(); }
   listImportantDays():ImportantDay[] {
-    return this.db.prepare('SELECT * FROM important_days ORDER BY createdAt,id').all().map(row=>({...row,yearly:Boolean(row.yearly)} as unknown as ImportantDay));
+    return this.db.prepare('SELECT * FROM important_days ORDER BY createdAt,id').all().map(row=>{
+      if(row.yearly!==0&&row.yearly!==1||row.isLeapMonth!==0&&row.isLeapMonth!==1)throw new Error('重要日子的重复或闰月数据无效');
+      return {...row,yearly:Boolean(row.yearly),isLeapMonth:Boolean(row.isLeapMonth)} as unknown as ImportantDay;
+    });
   }
   saveImportantDay(input:ImportantDayInput):ImportantDay {
     const value=validateImportantDay(input),now=new Date().toISOString(),id=input.id??randomUUID();assertId(id);
     const old=this.listImportantDays().find(d=>d.id===id);
     if(input.id&&!old)throw new Error('找不到这个重要日子，请重新读取');
     this.transaction(()=>{
-      this.db.prepare(`INSERT INTO important_days(id,name,calendar,year,month,day,yearly,reminderDays,note,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?)
-      ON CONFLICT(id) DO UPDATE SET name=excluded.name,calendar=excluded.calendar,year=excluded.year,month=excluded.month,day=excluded.day,yearly=excluded.yearly,reminderDays=excluded.reminderDays,note=excluded.note,updatedAt=excluded.updatedAt`)
-        .run(id,value.name,value.calendar,value.year,value.month,value.day,Number(value.yearly),value.reminderDays,value.note,old?.createdAt??now,now);
-      if(old&&['calendar','year','month','day','yearly','reminderDays'].some(k=>old[k as keyof ImportantDay]!==value[k as keyof ImportantDayInput]))this.db.prepare('DELETE FROM day_reminders WHERE dayId=?').run(id);
+      this.db.prepare(`INSERT INTO important_days(id,name,calendar,year,month,day,isLeapMonth,yearly,reminderDays,note,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(id) DO UPDATE SET name=excluded.name,calendar=excluded.calendar,year=excluded.year,month=excluded.month,day=excluded.day,isLeapMonth=excluded.isLeapMonth,yearly=excluded.yearly,reminderDays=excluded.reminderDays,note=excluded.note,updatedAt=excluded.updatedAt`)
+        .run(id,value.name,value.calendar,value.year,value.month,value.day,Number(value.isLeapMonth),Number(value.yearly),value.reminderDays,value.note,old?.createdAt??now,now);
+      if(old&&['calendar','year','month','day','isLeapMonth','yearly','reminderDays'].some(k=>old[k as keyof ImportantDay]!==value[k as keyof ImportantDayInput]))this.db.prepare('DELETE FROM day_reminders WHERE dayId=?').run(id);
     });
     return this.listImportantDays().find(d=>d.id===id)!;
   }

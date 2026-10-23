@@ -13,7 +13,8 @@ export interface BatchResult { succeeded: string[]; failed: { id: string; error:
 export interface Overview { active: number; trash: number; tags: { name: string; count: number }[] }
 export interface AppInfo { dataDir: string; version: string; lastBackup: string | null; backupWarning: string | null }
 export interface ImportantDayInput {
-  id?: string; name: string; calendar: 'solar'; year: number | null; month: number; day: number;
+  id?: string; name: string; calendar: 'solar' | 'lunar'; year: number | null; month: number; day: number;
+  isLeapMonth: boolean;
   yearly: boolean; reminderDays: number; note: string;
 }
 export interface ImportantDay extends ImportantDayInput { id: string; createdAt: string; updatedAt: string }

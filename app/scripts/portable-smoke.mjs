@@ -17,6 +17,7 @@ try{
   assert.equal(before.dataDir,path.join(original,'我的数据'));assert.ok(before.lastBackup);assert.equal(before.backupWarning,null);
   assert.equal((await page.evaluate(()=>window.notes.list({}))).length,0);
   const important=await page.evaluate(async()=>{const day=await window.notes.saveImportantDay({name:'搬迁后仍记得的日子',calendar:'solar',year:2000,month:11,day:18,yearly:true,reminderDays:365,note:'隔离验收资料'});await window.notes.acknowledgeDayReminders((await window.notes.pendingDayReminders()).map(r=>r.key));return day;});
+  const lunar=await page.evaluate(async()=>{const day=await window.notes.saveImportantDay({name:'搬迁后的农历生日',calendar:'lunar',year:2025,month:6,day:1,isLeapMonth:true,yearly:true,reminderDays:14,note:'闰月也应完整保留'});await window.notes.acknowledgeDayReminders((await window.notes.pendingDayReminders()).map(r=>r.key));return day;});
   const note=await page.evaluate(async()=>{const {note}=await window.notes.create();await window.notes.save({...note,title:'整套文件夹搬迁验收',document:{type:'doc',content:[{type:'paragraph',content:[{type:'text',text:'这是一条验收数据，交付前会清理。'}]}]}});return note;});
   const assets=await page.evaluate(async({id,file})=>window.notes.importPaths(id,[file]),{id:note.id,file:path.resolve('assets/icon.png')});
   await page.evaluate(async({id,asset})=>{const {note}=await window.notes.get(id);note.document.content.push({type:'image',attrs:{assetId:asset.id,src:`app-asset://media/${asset.id}`}});await window.notes.save(note);},{id:note.id,asset:assets[0]});
@@ -26,7 +27,7 @@ try{
   for(let i=1;i<=8;i++){const d=new Date();d.setDate(d.getDate()-i);const name=`自动备份-${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}.zip`;generated.push(name);await fs.copyFile(path.join(backups,todayFile),path.join(backups,name));}
   await moveFolder(original,moved);activeFolder=moved;page=await launch(moved);
   const after=await page.evaluate(()=>window.notes.info());assert.equal(after.dataDir,path.join(moved,'我的数据'));
-  assert.deepEqual(await page.evaluate(()=>window.notes.listImportantDays()),[important]);assert.equal((await page.evaluate(()=>window.notes.pendingDayReminders())).length,0);
+  assert.deepEqual(await page.evaluate(()=>window.notes.listImportantDays()),[important,lunar]);assert.equal((await page.evaluate(()=>window.notes.pendingDayReminders())).length,0);
   const detail=await page.evaluate(id=>window.notes.get(id),note.id);assert.equal(detail.note.title,'整套文件夹搬迁验收');
   await page.getByRole('button',{name:'全部记录',exact:true}).click();await page.locator('.note-card').first().click();await page.locator('.tiptap img').waitFor();await page.waitForFunction(()=>document.querySelector('.tiptap img')?.naturalWidth>0);
   assert.equal((await fs.readdir(path.join(moved,'我的数据','自动备份'))).filter(n=>n.endsWith('.zip')).length,7);
@@ -34,9 +35,10 @@ try{
   await instance.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:1,checkboxChecked:false});});
   await page.evaluate(async id=>{await window.notes.trash(id);await window.notes.remove(id);},note.id);
   await page.evaluate(id=>window.notes.removeImportantDay(id),important.id);
+  await page.evaluate(id=>window.notes.removeImportantDay(id),lunar.id);
   assert.equal((await page.evaluate(()=>window.notes.list({}))).length,0);await close();
   await moveFolder(moved,original);activeFolder=original;
   // This directory was created exclusively by this smoke test, before delivery.
   const clean=path.join(original,'我的数据');assert.ok(clean.startsWith(stagingRoot+path.sep));await fs.rm(clean,{recursive:true,force:true,maxRetries:30,retryDelay:250});await fs.mkdir(clean);
-  console.log(JSON.stringify({passed:true,defaultDataLocation:true,dailyBackup:true,retainsSevenBackups:true,wholeProgramMoved:true,imagesAfterMove:true,importantDaysAndReminderStateAfterMove:true,deliveryDataIsEmpty:true},null,2));
+  console.log(JSON.stringify({passed:true,defaultDataLocation:true,dailyBackup:true,retainsSevenBackups:true,wholeProgramMoved:true,imagesAfterMove:true,importantDaysAndReminderStateAfterMove:true,lunarDateAndLeapMonthAfterMove:true,deliveryDataIsEmpty:true},null,2));
 }catch(error){console.error('搬迁检查：',error);throw error;}finally{if(instance)await instance.close();if(activeFolder===moved)await moveFolder(moved,original);}
