@@ -10,7 +10,7 @@ import type { AppInfo, Attachment, Filter, Note, NoteDetail, NoteSummary, Overvi
 import {usePanels,Splitter,LibraryHeightSplitter,LIBRARY_HEADER,rangeSelection} from './layout';
 import {insertPlainText,notePlainText,plainText} from './plain-text';
 import {Home} from './Home';
-import {noteTitle} from './home-model';
+import {homeSnapshot,noteTitle} from './home-model';
 
 const LocalImage = Image.extend({
   addAttributes() { return { ...this.parent?.(), assetId: { default: null }, width: { default: 560, renderHTML: attrs => ({ width: attrs.width, style: `max-width:100%;width:${attrs.width}px;height:auto` }) } }; }
@@ -328,17 +328,19 @@ export default function App() {
       <div className="app-brand"><img src={appMark} alt="" draggable={false}/><strong>随手记</strong></div>
       <nav className="space-tabs" aria-label="记录空间">
         <button aria-label="首页" aria-current={inHome?'page':undefined} className={inHome?'current':''} disabled={blocked} onClick={()=>void openHome()}>首页</button>
-        <button aria-label="全部记录" aria-current={!inHome&&!trash?'page':undefined} className={!inHome&&!trash?'current':''} disabled={blocked} onClick={()=>void changeView(false,'',true)}>手记库 <small>{overview.active}</small></button>
-        <button aria-label="回收站" aria-current={!inHome&&trash?'page':undefined} className={!inHome&&trash?'current':''} disabled={blocked} onClick={()=>void changeView(true,'',true)}>回收站{overview.trash>0&&<small>{overview.trash}</small>}</button>
+        <button aria-label="全部记录" aria-current={!inHome&&!trash?'page':undefined} className={!inHome&&!trash?'current':''} disabled={blocked} onClick={()=>void changeView(false,'',true)}>手记库 {!inHome&&<small>{overview.active}</small>}</button>
+        <button aria-label="回收站" aria-current={!inHome&&trash?'page':undefined} className={!inHome&&trash?'current':''} disabled={blocked} onClick={()=>void changeView(true,'',true)}>回收站{!inHome&&overview.trash>0&&<small>{overview.trash}</small>}</button>
       </nav>
       <div className="navigation-tools">
-        <button className="new-button" aria-label="新建记录" title="新建记录 Ctrl+N" disabled={blocked} onClick={()=>void newNote()}><Plus size={17}/><span>新建记录</span><kbd>Ctrl N</kbd></button>
+        {!inHome&&<button className="new-button" aria-label="新建记录" title="新建记录 Ctrl+N" disabled={blocked} onClick={()=>void newNote()}><Plus size={17}/><span>新建记录</span><kbd>Ctrl N</kbd></button>}
         <div className="settings-anchor"><IconButton title="数据与设置" disabled={blocked} onClick={()=>setMenu(!menu)}><Settings2 size={19}/></IconButton>
           {menu&&<div className="dropdown settings-menu" onClick={e=>e.stopPropagation()}>
             <div className="menu-heading">本地资料管理</div>
+            <div className="settings-summary" aria-label="资料近况"><span><b data-testid="settings-total">{overview.active}</b> 条手记 · 近7天更新 <b data-testid="home-week">{homeSnapshot(homeNotes,lastOpened,new Date()).updatedThisWeek}</b> 条</span><span className="settings-backup-state">{info?.lastBackup?`最近备份：${fullDate(info.lastBackup)}`:'暂无备份'}</span>{info?.backupWarning&&<p className="danger">{info.backupWarning}</p>}</div>
             <button onClick={()=>void act(()=>api.backup(),'备份已保存，可将备份复制到U盘')}><Download/>备份全部数据</button>
             <button onClick={()=>void act(async()=>{const restored=await api.restoreBackup();if(restored){setUndo(null);clearSelection();}return restored;},'备份已恢复',true)}><ArchiveRestore/>从备份恢复</button>
             <button onClick={()=>void act(()=>api.exportNotes(),'已导出为可直接查看的网页')}><Upload/>导出全部记录</button><div className="menu-line"/>
+            <button onClick={()=>{setMenu(false);void changeView(true,'',true);}}><Trash2/>查看回收站{overview.trash>0?`（${overview.trash} 条）`:''}</button>
             <button onClick={()=>void api.openDataDir().catch(report)}><FolderOpen/>打开数据文件夹</button>
             <button onClick={()=>{setMenu(false);setHelp(true);}}><BookOpen/>使用说明与数据位置</button>
           </div>}
@@ -346,7 +348,7 @@ export default function App() {
       </div>
     </header>
     <div className="workbench">
-      {inHome&&<Home notes={homeNotes} overview={overview} lastId={lastOpened} info={info} busy={blocked} loaded={homeLoaded} onOpen={id=>void openNote(id)} onNew={()=>void newNote()} onBrowse={tag=>void changeView(false,tag??'',true)} onSearch={()=>void searchRecords()} onTrash={()=>void changeView(true,'',true)} onBackup={()=>void act(()=>api.backup(),'备份已保存，可将备份复制到U盘')} onRetry={()=>void openHome()}/>}
+      {inHome&&<Home notes={homeNotes} lastId={lastOpened} info={info} busy={blocked} loaded={homeLoaded} onOpen={id=>void openNote(id)} onNew={()=>void newNote()} onBrowse={()=>void changeView(false,'',true)} onRetry={()=>void openHome()}/>}
       <section className="notes-panel" aria-label={inLibrary?'手记库':'记录目录'} hidden={!indexVisible}>
         <div className="collection-heading" ref={libraryHeading}>
           <div><div className="section-overline">{trash?'已删除的记录':'文字 · 图片 · 文件'}</div><h1 title={tag||undefined}>{trash?'回收站':tag?tag:'手记库'}<span>{list.length} 条记录</span></h1><p>{trash?'留在这里，仍然可以找回。':'把值得留下的，放在一起。'}</p></div>
@@ -427,8 +429,8 @@ export default function App() {
       <p>选中正文后按 <strong>Ctrl+Shift+C</strong> 复制为纯文本，按 <strong>Ctrl+Shift+V</strong> 粘贴为纯文本；也可右键正文或点击工具栏“纯文本”。去掉来源格式并保留换行，粘贴位置已有的段落或列表布局会保留。记录右上角“更多记录操作”可复制全文纯文本，包含标题和正文，不包含图片及附件。原有 Ctrl+C / Ctrl+V 保留格式复制和粘贴。</p>
       <p>列表上方点击“多选”，或按住 Ctrl 点击记录。Shift 点击连续选择；全选只选中当前筛选结果。在列表中按 Delete 可以删除所选记录，输入文字时仍按正常文字编辑处理。</p>
       <p>移入回收站后，右下角有 10 秒“撤销”。回收站可批量恢复或永久删除；右键记录也有常用操作。</p>
-      <p>每次打开先进入首页，查看最近更新、资料近况和上次打开的记录；不会自动新建空白页。顶部“首页”“手记库”和“回收站”用于切换空间。首页按Ctrl+F可进入手记库并聚焦搜索；书写页点击“首页”会先完成保存。</p>
-      <p>手记库按行展示记录，点击一行进入书写页；左上角“手记库”可返回完整索引。标签筛选、排序和多选位于索引上方。首页的“近7天有更新”按本地日期统计今天及前六天，最近更新按实际修改时间排列，不受置顶、搜索或标签筛选影响。</p>
+      <p>每次打开先进入首页，点击“写点什么”开始一条新记录，或从下方继续写、回顾最近内容；不会自动新建空白页。资料数量和备份详情位于右上角“数据与设置”。顶部“首页”“手记库”和“回收站”用于切换空间。首页按Ctrl+F可进入手记库并聚焦搜索；书写页点击“首页”会先完成保存。</p>
+      <p>手记库按行展示记录，点击一行进入书写页；左上角“手记库”可返回完整索引。标签筛选、排序和多选位于索引上方。“数据与设置”中的“近7天更新”按本地日期统计今天及前六天，最近更新按实际修改时间排列，不受置顶、搜索或标签筛选影响。</p>
       <p>手记库表头下方的分隔线可上下拖动，向上压缩标题区即可看到更多记录；双击恢复默认，也可用上下方向键调整。“紧凑视图”一次缩小标题区及行距，点击“舒展视图”还原。搜索、筛选和表头保持可用，选择会自动记住。</p>
       <p>书写页上方的目录按钮可打开记录目录；拖动目录右边的分隔线调整宽度，双击恢复默认。专注模式隐藏顶部导航和目录，再次点击恢复。Ctrl+F 自动打开目录并聚焦搜索。目录宽度、筛选收起状态、排序和窗口大小都会记住。</p>
       <p>再次打开先到首页，点击“继续上次”回到上次主动打开的有效记录。连续点击新建时，会继续使用当前的空白记录。</p>
