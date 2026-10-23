@@ -6,7 +6,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 process.chdir(appRoot);
-const root=path.join(testRoot,'home-'+Date.now()),shots=path.join(testRoot,'home-1.5.1');
+const root=path.join(testRoot,'home-'+Date.now()),shots=path.join(testRoot,'home-1.5.2');
 await fs.mkdir(root,{recursive:true});await fs.mkdir(shots,{recursive:true});
 const store=new Store(root),ids=[],now=Date.now();
 const titles=['工作台的小改造','周末去河边走走','一本书，读到这里','下周要带的资料','先留住这个想法','很早以前的一条置顶'];
@@ -44,6 +44,7 @@ try{
  assert.equal(await page.getByRole('button',{name:'继续上次记录',exact:true}).locator('strong').innerText(),titles[2]);assert.equal(await page.locator('.editor-panel').isVisible(),false);
  assert.equal((await page.evaluate(()=>JSON.parse(localStorage.getItem('suishouji:workspace:v2')))).indexWidth,410);
  await geometry();await shot('01-首页概览');checks.push('兼容旧书写和专注偏好，启动固定首页且保留栏宽');
+ await resize(1600,960);await geometry();await shot('06-1600大窗口');await resize(1260,820);
  const composition=await page.evaluate(()=>{const box=s=>document.querySelector(s).getBoundingClientRect();return {title:box('.home-intro h1').bottom,create:box('.home-create').top,continued:box('.home-continue-section').top,recent:box('.home-recents').top,foot:box('.home-footnote').top,continuationHeight:box('.home-continue-section').height,titleSize:parseFloat(getComputedStyle(document.querySelector('.home-intro h1')).fontSize),continueSize:parseFloat(getComputedStyle(document.querySelector('.home-continue-copy strong')).fontSize),background:getComputedStyle(document.querySelector('.home-continuation')).backgroundColor};});
  assert.ok(composition.title<composition.create&&composition.create<composition.continued&&composition.continued<composition.recent&&composition.recent<composition.foot);assert.ok(composition.continuationHeight<150);assert.ok(composition.titleSize>composition.continueSize*1.7);assert.equal(composition.background,'rgba(0, 0, 0, 0)');checks.push('单列顺序与视觉层级，首页唯一新建，系统管理移至设置');
  await page.getByRole('button',{name:'继续上次记录',exact:true}).click();await page.locator('.document-mode').waitFor();await ready();assert.equal(await page.getByLabel('记录标题').inputValue(),titles[2]);
@@ -62,7 +63,15 @@ try{
  await page.getByRole('button',{name:'继续上次记录',exact:true}).click();await ready();await page.getByRole('button',{name:'更多记录操作',exact:true}).click();await page.getByRole('button',{name:'移到回收站',exact:true}).click();await ready();await home();assert.equal(await page.locator('[data-testid="home-total"]').innerText(),'6');assert.equal(await page.getByRole('button',{name:'继续上次记录',exact:true}).count(),0);
  await page.getByRole('button',{name:'数据与设置',exact:true}).click();await page.getByRole('button',{name:/^查看回收站/}).click();await page.locator('.note-card').filter({hasText:'保存失败时保留这一页'}).click();await page.getByRole('button',{name:'恢复记录',exact:true}).click();await ready();await home();assert.equal(await page.getByRole('button',{name:'继续上次记录',exact:true}).locator('strong').innerText(),'保存失败时保留这一页');await page.getByRole('button',{name:'关闭提示',exact:true}).click();checks.push('删除后不继续已删除记录，设置可找回回收站内容');
  await resize(920,650);await geometry();await shot('02-窄窗口首页');assert.ok(await page.locator('.home-page').evaluate(n=>n.scrollHeight>n.clientHeight));await page.keyboard.press('Control+f');await page.waitForFunction(()=>document.querySelector('[aria-label="搜索记录"]')===document.activeElement);await home();
- await page.getByRole('button',{name:'继续上次记录',exact:true}).click();await ready();await page.getByLabel('记录标题').fill('用于检验标题换行与内容边界的长标题'.repeat(8));await home();await geometry();await shot('03-长标题');checks.push('920px窗口可滚动且导航、搜索及长标题不溢出');
+ const longTitle='用于检验标题换行与内容边界的长标题'.repeat(8),longBody='一段中文摘要 MixedEnglishIdentifier '.repeat(80);
+ await page.getByRole('button',{name:'继续上次记录',exact:true}).click();await ready();await page.getByLabel('记录标题').fill(longTitle);await page.getByRole('textbox',{name:'记录正文'}).fill(longBody);await home();
+ async function clippedText(){
+  await geometry();
+  const metrics=await page.evaluate(()=>{const title=document.querySelector('.home-continue-copy strong'),summary=document.querySelector('.home-continue-preview');return {titleHeight:title.getBoundingClientRect().height,titleLine:parseFloat(getComputedStyle(title).lineHeight),summaryHeight:summary.getBoundingClientRect().height,summaryLine:parseFloat(getComputedStyle(summary).lineHeight),previewLength:summary.textContent.length,clipped:title.scrollHeight>title.clientHeight,recentGaps:[...document.querySelectorAll('.home-recent')].map(row=>row.querySelector('.home-recent-meta').getBoundingClientRect().left-row.querySelector('.home-recent-copy').getBoundingClientRect().right)};});
+  assert.ok(metrics.titleHeight<=metrics.titleLine*2+1);assert.ok(metrics.summaryHeight<=metrics.summaryLine+1);assert.ok(metrics.previewLength<=101);assert.ok(metrics.clipped);assert.ok(metrics.recentGaps.every(gap=>gap>=0&&gap<=20));
+ }
+ await clippedText();await shot('03-长标题');await resize(1600,960);await clippedText();await shot('07-大窗口长标题');
+ const saved=await page.evaluate(id=>window.notes.get(id),lastId);assert.equal(saved.note.title,longTitle);assert.equal(saved.note.plainText,longBody.trim());checks.push('1600大窗口与920窄窗口文字稳定截断，完整标题正文保存不变');
  await close();await launch(path.join(root,'empty'));assert.equal(await page.getByRole('button',{name:'继续上次记录',exact:true}).count(),0);assert.equal(await page.getByRole('button',{name:'打开最近记录',exact:true}).count(),0);assert.equal((await page.evaluate(()=>window.notes.list({}))).length,0);await shot('04-首次使用');await geometry();
  await page.keyboard.press('Control+f');await page.locator('.library-mode').waitFor();assert.equal((await page.evaluate(()=>window.notes.list({}))).length,0);await home();await page.getByRole('button',{name:'新建记录',exact:true}).click();await page.locator('.document-mode').waitFor();await ready();assert.equal((await page.evaluate(()=>window.notes.list({}))).length,1);checks.push('空首页无假记录，首次使用可自由浏览或开始记录');
  assert.deepEqual(errors,[]);console.log(JSON.stringify({passed:true,checks,screenshots:shots},null,2));
