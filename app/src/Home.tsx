@@ -23,7 +23,7 @@ export function Home({notes,lastId,info,busy,loaded,onOpen,onNew,onBrowse,onRetr
     <div className="home-inner">
       <section className="home-intro" aria-label="开始记录">
         <time className="home-dateline" dateTime={now.toISOString()}>{now.toLocaleDateString('zh-CN',{month:'long',day:'numeric'})}<span aria-hidden="true"> · </span>{now.toLocaleDateString('zh-CN',{weekday:'long'})}</time>
-        {!!upcoming.length&&<div className="home-days" aria-label="临近的重要日子" aria-live="polite">{upcoming.slice(0,2).map(o=><button key={o.entry.id} className={`home-day ${o.days===0?'today':o.days<=7?'near':''}`} disabled={busy} onClick={()=>onDay(o.entry)} title={`${o.entry.name} · ${dayDistance(o.days)}`}><span>{o.entry.name}</span><small>· {dayDistance(o.days)}</small></button>)}{upcoming.length>2&&<button className="home-days-more" disabled={busy} onClick={()=>onDay()}>另有{upcoming.length-2}个重要日子<ArrowUpRight size={11}/></button>}</div>}
+        {!!upcoming.length&&<div className="home-days" aria-label="临近的重要日子" aria-live="polite">{upcoming.slice(0,2).map(o=><button key={o.entry.id} className={`home-day ${o.days===0?'today':o.days<=7?'near':''}`} disabled={busy} onClick={()=>onDay(o.entry)} title={`${dayDistance(o.days)} · ${o.entry.name}`}><small>{dayDistance(o.days)} ·</small><span>{o.entry.name}</span></button>)}{upcoming.length>2&&<button className="home-days-more" disabled={busy} onClick={()=>onDay()}>另有{upcoming.length-2}个重要日子<ArrowUpRight size={11}/></button>}</div>}
         <h1>给想法一点空间。</h1>
         <p>写点刚刚想到的，<br/>或接着上次没写完的。</p>
         <button className="home-create" aria-label="新建记录" title="写点什么 Ctrl+N" disabled={busy||!loaded} onClick={onNew}><Plus size={19}/><span>写点什么</span><kbd>Ctrl N</kbd></button>

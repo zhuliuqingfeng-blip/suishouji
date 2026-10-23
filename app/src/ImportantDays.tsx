@@ -31,11 +31,10 @@ export function ImportantDaysPage({entries,now,error,loaded,busy,onAdd,onOpen,on
   </button>);
   return <main className="important-days-page" aria-label="重要日子" aria-busy={busy}>
     <div className="important-days-inner">
-      <header className="important-days-heading"><div><h1>重要日子</h1><p>把重要的人和日子，记在这里。</p></div><button className="day-add" onClick={onAdd} disabled={busy||!loaded}><Plus size={17}/>添加重要日子</button></header>
+      <header className="important-days-heading"><div><h1>重要日子</h1><p>把重要的人和日子，记在这里。</p></div><button className="day-add" aria-label="添加重要日子" onClick={onAdd} disabled={busy||!loaded}><Plus size={17}/>添加</button></header>
       {error?<div className="days-unavailable" role="alert"><p>暂时没能读取重要日子：{error}</p><button onClick={onRetry}>重新读取</button></div>:!loaded?<p className="days-empty">正在翻开重要日子…</p>:<>
         {upcoming.length?<div className="important-days-list">{rows(upcoming)}</div>:<p className="days-empty">{past.length?'接下来的日子，等你慢慢记下。':'生日、纪念日，或其他不想忘记的日期。\n从上方添加第一个重要日子。'}</p>}
         {!!past.length&&<details className="past-days"><summary>过去的日子 <ChevronDown size={14}/></summary><div>{rows(past)}</div></details>}
-        <p className="days-footnote">在应用内轻轻提醒。关闭软件后，不会在后台提醒。</p>
       </>}
     </div>
   </main>;
@@ -75,7 +74,7 @@ export function ImportantDayDialog({entry,api,onSaved,onClose,closeRequest}:{ent
       {value.yearly&&value.month===2&&value.day===29&&<p className="day-form-help">平年按2月最后一天提醒。</p>}
       <label>提前提醒<select aria-label="提前提醒" value={reminder} disabled={working} onChange={e=>{setReminder(e.target.value);if(e.target.value!=='custom')change('reminderDays',Number(e.target.value));}}>{presets.map(n=><option key={n} value={n}>{n===0?'当天':'提前'+n+'天'}</option>)}<option value="custom">自定义</option></select></label>
       {reminder==='custom'&&<label className="day-custom">提前天数<input aria-label="提前天数" type="number" min="0" max="365" value={Number.isNaN(value.reminderDays)?'':value.reminderDays} disabled={working} onChange={e=>change('reminderDays',e.target.value===''?NaN:Number(e.target.value))}/></label>}
-      <p className="day-form-help">{value.reminderDays>0?'提前提醒一次，当天再提醒一次。':'当天在应用内提醒一次。'}关闭软件后不会提醒。</p>
+      <p className="day-form-help">{value.reminderDays>0?'提前提醒一次，当天再提醒一次。':'当天提醒一次。'}<br/>提醒仅在「随手记」运行期间生效。</p>
       <label>备注<span className="field-optional">可选</span><textarea aria-label="日子备注" maxLength={3000} rows={3} value={value.note} placeholder="留下一点与这个日子有关的话。" disabled={working} onChange={e=>change('note',e.target.value)}/></label>
       {preview&&<p className="day-preview">{preview}</p>}
       {error&&<p className="day-form-error" role="alert">{error}</p>}
@@ -83,7 +82,7 @@ export function ImportantDayDialog({entry,api,onSaved,onClose,closeRequest}:{ent
     </form>:<div className="day-detail">
       <h2>{value.name}</h2><p className="day-detail-date">{originalDate(value as ImportantDay)}</p><p className="day-detail-distance">{dayDistance(occurrence(value as ImportantDay).days)}</p>
       {value.yearly&&value.month===2&&value.day===29&&<p className="day-form-help">平年按2月最后一天提醒。</p>}
-      <p className="day-detail-reminder">{value.reminderDays?'提前'+value.reminderDays+'天和当天，在应用内提醒。':'当天在应用内提醒。'}</p>
+      <p className="day-detail-reminder">{value.reminderDays?'提前'+value.reminderDays+'天和当天提醒。':'当天提醒一次。'}</p><p className="day-form-help">提醒仅在「随手记」运行期间生效。</p>
       {value.note&&<p className="day-detail-note">{value.note}</p>}
       {error&&<p className="day-form-error" role="alert">{error}</p>}
       {!confirmation&&<footer className="day-dialog-actions"><button className="day-delete" onClick={()=>setConfirmation('delete')}>删除这个日子</button><button className="day-primary" onClick={()=>setEditing(true)}>编辑</button></footer>}

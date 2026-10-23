@@ -5,7 +5,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 process.chdir(appRoot);
-const root=path.join(testRoot,'important-days-'+Date.now()),shots=path.join(testRoot,'important-days-1.6.0');
+const version=JSON.parse(await fs.readFile(path.join(appRoot,'package.json'),'utf8')).version;
+const root=path.join(testRoot,'important-days-'+Date.now()),shots=path.join(testRoot,'important-days-'+version);
 await fs.mkdir(root,{recursive:true});await fs.mkdir(shots,{recursive:true});
 let app,page;const errors=[],checks=[];
 async function launch(){app=await electron.launch({executablePath:process.env.NOTES_PACKAGED_EXE||electronPath,args:process.env.NOTES_PACKAGED_EXE?[]:[appRoot],env:{...process.env,NOTES_TEST_MODE:'1',NOTES_DATA_DIR:root}});page=await app.firstWindow();page.on('pageerror',e=>errors.push(e.message));await page.locator('.home-mode').waitFor();await ready();}
@@ -13,13 +14,14 @@ async function ready(){await page.waitForFunction(()=>!document.querySelector('.
 async function close(){const end=app.waitForEvent('close');await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].close());await end;app=null;}
 async function nav(name){await page.getByRole('button',{name,exact:true}).click();await ready();}
 async function dates(){await nav('重要日子');await page.locator('.days-mode').waitFor();}
-async function add(name,offset=0,{year=null,yearly=true,reminder='14'}={}){
+async function add(name,offset=0,{year=null,yearly=true,reminder='14',note=''}={}){
  const date=new Date();date.setDate(date.getDate()+offset);
  await page.getByRole('button',{name:'添加重要日子',exact:true}).click();await page.getByRole('dialog',{name:'添加重要日子',exact:true}).waitFor();
  await page.getByLabel('日子名称',{exact:true}).fill(name);await page.getByLabel('月份',{exact:true}).selectOption(String(date.getMonth()+1));await page.getByLabel('日期',{exact:true}).selectOption(String(date.getDate()));
  if(!yearly){await page.getByLabel('每年重复',{exact:true}).uncheck();year=date.getFullYear();}
  if(year!==null)await page.getByLabel('年份',{exact:true}).fill(String(year));
  await page.getByLabel('提前提醒',{exact:true}).selectOption(reminder);
+ if(note)await page.getByLabel('日子备注',{exact:true}).fill(note);
  await page.getByRole('button',{name:'保存',exact:true}).click();await page.locator('.day-dialog').waitFor({state:'detached'});
 }
 async function entries(){return page.evaluate(()=>window.notes.listImportantDays());}
@@ -38,9 +40,13 @@ try{
  await dates();assert.equal(await page.locator('.important-day-row').count(),0);assert.equal(await page.locator('.navigation-tools .new-button').count(),0);await shot('01-首次使用');checks.push('默认首页无日期占位，导航三个入口，空日子页不创建手记');
  await page.getByRole('button',{name:'添加重要日子',exact:true}).click();await page.keyboard.press('Control+n');await page.keyboard.press('Control+f');assert.equal((await page.evaluate(()=>window.notes.list({}))).length,0);assert.equal(await page.locator('.days-mode').count(),1);assert.equal(await page.getByLabel('提前提醒',{exact:true}).inputValue(),'14');assert.equal(await page.getByLabel('年份',{exact:true}).inputValue(),'');assert.ok(await page.getByLabel('每年重复',{exact:true}).isChecked());
  await page.getByLabel('日子名称',{exact:true}).fill('未保存的名字');await page.keyboard.press('Control+n');assert.equal((await page.evaluate(()=>window.notes.list({}))).length,0);await page.keyboard.press('Escape');await page.getByRole('group',{name:'未保存的修改'}).waitFor();await page.getByRole('button',{name:'继续编辑',exact:true}).click();assert.equal(await page.getByLabel('日子名称',{exact:true}).inputValue(),'未保存的名字');await page.getByRole('button',{name:'取消',exact:true}).click();await page.getByRole('button',{name:'放弃修改',exact:true}).click();checks.push('表单默认14天与可选年份，弹窗阻止后台快捷键，取消时保留未保存选择');
+ const privateNote='喜欢手写的卡片，去年一起去了海边。';await add('生日',145,{note:privateNote});
+ assert.equal(await page.locator('.day-add').innerText(),'添加');await page.locator('.day-add').hover();await page.waitForFunction(()=>getComputedStyle(document.querySelector('.day-add')).backgroundColor!=='rgba(0, 0, 0, 0)');
+ await page.locator('.important-day-row').hover();assert.equal(await page.locator('.important-day-row').evaluate(n=>getComputedStyle(n).backgroundColor),'rgba(0, 0, 0, 0)');assert.doesNotMatch(await page.locator('.important-days-page').innerText(),/喜欢手写|关闭软件|后台提醒/);assert.equal(await page.locator('.app-status .status-hint').innerText(),'');await geometry();await shot('09-单条日子');
+ await nav('首页');assert.equal(await page.locator('.home-days').count(),0);await dates();await page.locator('.important-day-row').click();assert.equal(await page.locator('.day-detail-note').innerText(),privateNote);assert.match(await page.locator('.day-detail').innerText(),/提醒仅在「随手记」运行期间生效/);await page.getByRole('button',{name:'删除这个日子',exact:true}).click();await page.getByRole('button',{name:'确认删除',exact:true}).click();await page.locator('.day-dialog').waitFor({state:'detached'});checks.push('单条列表透明、添加入口清晰，说明移至弹窗，备注仅在详情显示，远期日期不占首页');
  await add('妈妈生日',0);await add('我们的纪念日',5,{year:2000});await add('远一点的生日',13);await add('可以慢慢准备的日子',25,{reminder:'30'});await add('过去的一次旅行',-5,{yearly:false});
  assert.deepEqual(await page.locator('.important-days-list .day-row-copy strong').allTextContents(),['妈妈生日','我们的纪念日','远一点的生日','可以慢慢准备的日子']);assert.equal((await entries()).find(d=>d.name==='我们的纪念日').year,2000);assert.equal(await page.locator('.past-days .important-day-row').isVisible(),false);await page.locator('.past-days summary').click();assert.equal(await page.locator('.past-days .day-row-copy strong').innerText(),'过去的一次旅行');await page.locator('.past-days summary').click();await geometry();await shot('02-重要日子列表');checks.push('新增持久化、年份保留、下次日期排序，一次性过去日期折叠');
- await nav('首页');await page.locator('.home-days').waitFor();assert.equal(await page.locator('.home-day').count(),2);assert.match(await page.locator('.home-day').first().innerText(),/妈妈生日.*今天/s);assert.equal(await page.locator('.home-days-more').innerText(),'另有2个重要日子');await geometry();await shot('03-首页轻提示');
+ await nav('首页');await page.locator('.home-days').waitFor();assert.equal(await page.locator('.home-day').count(),2);assert.match(await page.locator('.home-day').first().innerText(),/今天.*妈妈生日/s);assert.doesNotMatch(await page.locator('.home-days').innerText(),/还有0天/);assert.equal(await page.locator('.home-days-more').innerText(),'另有2个重要日子');await geometry();await shot('03-首页轻提示');
  await page.locator('.home-day').first().click();await page.getByRole('dialog',{name:'重要日子详情',exact:true}).waitFor();await page.getByRole('button',{name:'编辑',exact:true}).click();await page.getByLabel('日子备注',{exact:true}).fill('记得给家里打个电话。');await page.getByRole('button',{name:'保存',exact:true}).click();await page.locator('.day-dialog').waitFor({state:'detached'});assert.equal((await entries()).find(d=>d.name==='妈妈生日').note,'记得给家里打个电话。');checks.push('首页仅两条轻提示加更多，点击进入详情与编辑');
  await page.locator('.important-day-row').first().click();await page.getByRole('button',{name:'删除这个日子',exact:true}).click();await page.getByRole('button',{name:'取消',exact:true}).click();assert.equal((await entries()).length,5);await page.getByRole('button',{name:'删除这个日子',exact:true}).click();await page.getByRole('button',{name:'确认删除',exact:true}).click();await page.locator('.day-dialog').waitFor({state:'detached'});assert.equal((await entries()).length,4);checks.push('删除只确认一次，取消不改变资料，确认删除独立日子');
  await page.locator('.important-day-row').first().click();await page.getByRole('button',{name:'编辑',exact:true}).click();await page.getByLabel('日子名称',{exact:true}).fill('名称完整保存');await sql("CREATE TRIGGER reject_ui_day BEFORE UPDATE ON important_days BEGIN SELECT RAISE(ABORT,'重要日子保存失败验收'); END;");await page.getByRole('button',{name:'保存',exact:true}).click();await page.getByRole('alert').filter({hasText:'重要日子保存失败验收'}).waitFor();assert.equal(await page.getByLabel('日子名称',{exact:true}).inputValue(),'名称完整保存');await sql('DROP TRIGGER reject_ui_day');await page.getByRole('button',{name:'保存',exact:true}).click();await page.locator('.day-dialog').waitFor({state:'detached'});checks.push('保存失败保留输入和重试，数据库恢复后保存成功');
