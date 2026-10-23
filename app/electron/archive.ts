@@ -8,6 +8,9 @@ import * as yazl from 'yazl';
 import * as yauzl from 'yauzl';
 import { Store, sha256, displayTitle } from './store.js';
 import type { RichNode } from './shared.js';
+import type {Attachment} from './shared.js';
+import {DatabaseSync} from 'node:sqlite';
+import {validateImportantDay} from './important-days.js';
 
 interface Manifest { format: 'suishouji-backup'; version: 1; createdAt: string; files: { path: string; size: number; sha256: string }[] }
 const validEntry = (name: string) => name === 'manifest.json' || name === 'notes.sqlite' || /^attachments\/[a-f\d-]{36}\.[a-z0-9]{1,10}$/.test(name);
@@ -20,7 +23,7 @@ export async function zipFiles(files: { source: string; name: string }[], destin
     zip.end(); await writing; await fsp.rename(temp, destination);
   } catch (error) { await fsp.rm(temp, { force: true }); throw error; }
 }
-export async function createBackup(store: Store, destination: string): Promise<void> {
+export async function createBackup(store: Pick<Store,'snapshot'|'allAssets'|'assetPath'>, destination: string): Promise<void> {
   const stage = await fsp.mkdtemp(path.join(os.tmpdir(), 'suishouji-backup-'));
   try {
     store.snapshot(path.join(stage, 'notes.sqlite'));
@@ -30,6 +33,18 @@ export async function createBackup(store: Store, destination: string): Promise<v
     await fsp.writeFile(path.join(stage, 'manifest.json'), JSON.stringify(manifest, null, 2));
     await zipFiles([...files, { source: path.join(stage, 'manifest.json'), name: 'manifest.json' }], destination);
   } finally { await fsp.rm(stage, { recursive: true, force: true }); }
+}
+// Upgrade scripts must back up the old schema before a new Store can migrate it.
+// The application must have completed its normal close before calling this.
+export async function createClosedBackup(root:string,destination:string) {
+  const db=new DatabaseSync(path.join(root,'notes.sqlite'),{readOnly:true});
+  try {
+    if((db.prepare('PRAGMA quick_check').get() as Record<string,string>).quick_check!=='ok')throw new Error('升级前数据校验未通过');
+    await createBackup({snapshot:file=>{db.prepare('VACUUM INTO ?').run(file);},allAssets:()=>db.prepare('SELECT * FROM attachments').all() as unknown as Attachment[],assetPath:a=>{
+      if(!/^attachments\/[a-f\d-]{36}\.[a-z0-9]{1,10}$/.test(a.relativePath))throw new Error('附件路径无效');return path.join(root,...a.relativePath.split('/'));
+    }},destination);
+    return {active:Number(db.prepare('SELECT count(*) AS n FROM notes WHERE deletedAt IS NULL').get()!.n),trash:Number(db.prepare('SELECT count(*) AS n FROM notes WHERE deletedAt IS NOT NULL').get()!.n)};
+  }finally{db.close();}
 }
 async function extractBackup(file: string, destination: string): Promise<string[]> {
   return new Promise((resolve, reject) => {
@@ -53,7 +68,7 @@ async function extractBackup(file: string, destination: string): Promise<string[
     });
   });
 }
-export async function validateBackup(file: string): Promise<{ stage: string; count: number; createdAt: string }> {
+export async function validateBackup(file: string): Promise<{ stage: string; count: number; dayCount:number; createdAt: string }> {
   const stage = await fsp.mkdtemp(path.join(os.tmpdir(), 'suishouji-restore-'));
   try {
     const entries = await extractBackup(file, stage);
@@ -75,7 +90,8 @@ export async function validateBackup(file: string): Promise<{ stage: string; cou
         const { normalizeDocument } = await import('./store.js');
         normalizeDocument(detail.note.document, new Set(detail.attachments.filter(a => a.kind === 'image').map(a => a.id)));
       }
-      return { stage, count: check.overview().active + check.overview().trash, createdAt: manifest.createdAt };
+      for(const day of check.listImportantDays())validateImportantDay(day);
+      return { stage, count: check.overview().active + check.overview().trash, dayCount:check.listImportantDays().length, createdAt: manifest.createdAt };
     } finally { check.close(); }
   } catch (error) { await fsp.rm(stage, { recursive: true, force: true }); throw error; }
 }

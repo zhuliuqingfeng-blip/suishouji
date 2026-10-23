@@ -3,6 +3,8 @@ import { randomUUID, createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Attachment, BatchResult, Filter, Note, NoteDetail, NoteInput, NoteSummary, Overview, RichNode } from './shared.js';
+import type {ImportantDay,ImportantDayInput,DayReminder} from './shared.js';
+import {validateImportantDay,reminderFor,orderedDays} from './important-days.js';
 
 export const EMPTY_DOC: RichNode = { type: 'doc', content: [{ type: 'paragraph' }] };
 export const imageMime: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.bmp': 'image/bmp' };
@@ -49,18 +51,47 @@ export class Store {
     this.db = new DatabaseSync(this.databasePath);
     this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;');
     const version = this.db.prepare('PRAGMA user_version').get() as { user_version: number };
-    if (version.user_version > 1) { this.db.close(); throw new Error('数据来自更新版本，请使用更新的随手记打开'); }
+    if (version.user_version > 2) { this.db.close(); throw new Error('数据来自更新版本，请使用更新的随手记打开'); }
     this.db.exec(`CREATE TABLE IF NOT EXISTS notes (
       id TEXT PRIMARY KEY, title TEXT NOT NULL, document TEXT NOT NULL, plainText TEXT NOT NULL,
       tags TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, pinned INTEGER NOT NULL DEFAULT 0, deletedAt TEXT);
       CREATE TABLE IF NOT EXISTS attachments (id TEXT PRIMARY KEY, noteId TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
       name TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL, kind TEXT NOT NULL, relativePath TEXT NOT NULL UNIQUE);
       CREATE INDEX IF NOT EXISTS attachment_note ON attachments(noteId);
-      PRAGMA user_version=1;`);
+      CREATE TABLE IF NOT EXISTS important_days (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, calendar TEXT NOT NULL, year INTEGER, month INTEGER NOT NULL, day INTEGER NOT NULL,
+      yearly INTEGER NOT NULL, reminderDays INTEGER NOT NULL, note TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS day_reminders (
+      key TEXT PRIMARY KEY, dayId TEXT NOT NULL REFERENCES important_days(id) ON DELETE CASCADE, seenAt TEXT NOT NULL);
+      PRAGMA user_version=2;`);
     if ((this.db.prepare('PRAGMA quick_check').get() as Record<string, string>).quick_check !== 'ok') throw new Error('数据检查未通过，请从备份恢复，原数据已保留');
     this.recoverDeletions();
   }
   close() { this.db.close(); }
+  listImportantDays():ImportantDay[] {
+    return this.db.prepare('SELECT * FROM important_days ORDER BY createdAt,id').all().map(row=>({...row,yearly:Boolean(row.yearly)} as unknown as ImportantDay));
+  }
+  saveImportantDay(input:ImportantDayInput):ImportantDay {
+    const value=validateImportantDay(input),now=new Date().toISOString(),id=input.id??randomUUID();assertId(id);
+    const old=this.listImportantDays().find(d=>d.id===id);
+    if(input.id&&!old)throw new Error('找不到这个重要日子，请重新读取');
+    this.transaction(()=>{
+      this.db.prepare(`INSERT INTO important_days(id,name,calendar,year,month,day,yearly,reminderDays,note,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(id) DO UPDATE SET name=excluded.name,calendar=excluded.calendar,year=excluded.year,month=excluded.month,day=excluded.day,yearly=excluded.yearly,reminderDays=excluded.reminderDays,note=excluded.note,updatedAt=excluded.updatedAt`)
+        .run(id,value.name,value.calendar,value.year,value.month,value.day,Number(value.yearly),value.reminderDays,value.note,old?.createdAt??now,now);
+      if(old&&['calendar','year','month','day','yearly','reminderDays'].some(k=>old[k as keyof ImportantDay]!==value[k as keyof ImportantDayInput]))this.db.prepare('DELETE FROM day_reminders WHERE dayId=?').run(id);
+    });
+    return this.listImportantDays().find(d=>d.id===id)!;
+  }
+  removeImportantDay(id:string) {assertId(id);if(!this.db.prepare('DELETE FROM important_days WHERE id=?').run(id).changes)throw new Error('找不到这个重要日子');}
+  pendingDayReminders(now=new Date()):DayReminder[] {
+    return orderedDays(this.listImportantDays(),now).map(o=>reminderFor(o.entry,now)).filter((r):r is DayReminder=>!!r&&!this.db.prepare('SELECT key FROM day_reminders WHERE key=?').get(r.key));
+  }
+  acknowledgeDayReminders(keys:string[],now=new Date()) {
+    if(!Array.isArray(keys)||keys.some(k=>typeof k!=='string'))throw new Error('提醒编号无效');
+    const pending=this.pendingDayReminders(now).filter(r=>keys.includes(r.key));
+    this.transaction(()=>{const stmt=this.db.prepare('INSERT OR IGNORE INTO day_reminders(key,dayId,seenAt) VALUES(?,?,?)');for(const r of pending)stmt.run(r.key,r.dayId,now.toISOString());});
+  }
   private decode(row: Record<string, unknown>): Note {
     return { ...row, document: JSON.parse(String(row.document)), tags: JSON.parse(String(row.tags)), pinned: Boolean(row.pinned) } as unknown as Note;
   }

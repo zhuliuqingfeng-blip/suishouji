@@ -133,7 +133,7 @@ try{
   await page.getByRole('button',{name:'进入专注模式'}).click();await page.screenshot({path:path.join(root,'04-focus.png')});
   await page.getByRole('button',{name:'退出专注模式'}).click();
   await page.getByRole('button',{name:'更多记录操作',exact:true}).click();await page.getByRole('button',{name:'移到回收站',exact:true}).click();
-  await page.getByRole('button',{name:'回收站',exact:true}).click();await page.locator('.note-card').first().click();await page.locator('.tiptap h2').waitFor();await selectText('.tiptap strong');
+  await page.getByRole('button',{name:'数据与设置',exact:true}).click();await page.getByRole('button',{name:/^查看回收站/}).click();await page.locator('.note-card').first().click();await page.locator('.tiptap h2').waitFor();await selectText('.tiptap strong');
   await menuAction('复制为纯文本');await page.locator('.tiptap strong').click({button:'right'});await until(async()=>(await readClipboard()).text==='保留灵感');
   const readonlyMenu=await instance.evaluate(()=>globalThis.__menuItems);assert.equal(readonlyMenu.find(i=>i.label==='粘贴为纯文本').enabled,false);
   checks.push('回收站允许纯文本复制，禁止粘贴');

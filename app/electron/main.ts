@@ -5,7 +5,7 @@ import fsp from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Store } from './store.js';
 import { createBackup, validateBackup, applyRestore, recoverInterruptedRestore, exportHtml } from './archive.js';
-import type { Filter, NoteInput, TextMenuAction, TextMenuOptions } from './shared.js';
+import type { Filter, NoteInput, TextMenuAction, TextMenuOptions, ImportantDayInput } from './shared.js';
 import { fitWindow,readWindowState,writeWindowState } from './window-state.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -32,6 +32,9 @@ async function dailyBackup() {
   lastBackup = (await fsp.stat(path.join(directory,file))).mtime.toISOString();
 }
 const methods: Record<string, (...args: any[]) => unknown> = {
+  listImportantDays:()=>store.listImportantDays(),saveImportantDay:(input:ImportantDayInput)=>store.saveImportantDay(input),
+  removeImportantDay:(id:string)=>store.removeImportantDay(id),pendingDayReminders:()=>store.pendingDayReminders(),
+  acknowledgeDayReminders:(keys:string[])=>store.acknowledgeDayReminders(keys),
   list: (f: Filter) => store.list(f), overview: () => store.overview(), create: () => store.create(), get: (id: string) => store.get(id), save: (input: NoteInput) => store.save(input),
   pin: (id: string, pinned: boolean) => store.pin(id, pinned), trash: (id: string) => store.trash(id), restoreNote: (id: string) => store.restore(id),
   trashMany: async (ids:string[])=>{
@@ -81,7 +84,7 @@ const methods: Record<string, (...args: any[]) => unknown> = {
     return exclusive(async () => {
       const backup = await validateBackup(picked.filePaths[0]);
       try {
-        const answer = await dialog.showMessageBox(win!, { type: 'question', title: '恢复备份', message: `恢复备份中的 ${backup.count} 条记录？`, detail: `备份时间：${new Date(backup.createdAt).toLocaleString('zh-CN')}\n当前记录会先完整备份，再替换为所选备份。`, buttons: ['取消', '备份当前数据并恢复'], defaultId: 0, cancelId: 0 });
+        const answer = await dialog.showMessageBox(win!, { type: 'question', title: '恢复备份', message: `恢复备份中的 ${backup.count} 条手记和 ${backup.dayCount} 个重要日子？`, detail: `备份时间：${new Date(backup.createdAt).toLocaleString('zh-CN')}\n当前资料会先完整备份，再替换为所选备份。`, buttons: ['取消', '备份当前数据并恢复'], defaultId: 0, cancelId: 0 });
         if (answer.response !== 1) return false;
         const dir = path.join(dataDir, '恢复前备份'); await fsp.mkdir(dir, { recursive: true }); await createBackup(store, path.join(dir, `恢复前-${fileStamp()}.zip`));
         applyRestore(store, backup.stage); return true;

@@ -11,6 +11,9 @@ import {usePanels,Splitter,LibraryHeightSplitter,LIBRARY_HEADER,rangeSelection} 
 import {insertPlainText,notePlainText,plainText} from './plain-text';
 import {Home} from './Home';
 import {homeSnapshot,noteTitle} from './home-model';
+import {ImportantDaysPage,ImportantDayDialog,useImportantDays,type DayCloseHandler} from './ImportantDays';
+import type {ImportantDay} from '../electron/shared';
+import {dayDistance,occurrence} from '../electron/important-days';
 
 const LocalImage = Image.extend({
   addAttributes() { return { ...this.parent?.(), assetId: { default: null }, width: { default: 560, renderHTML: attrs => ({ width: attrs.width, style: `max-width:100%;width:${attrs.width}px;height:auto` }) } }; }
@@ -33,6 +36,9 @@ export default function App() {
   const [listFilterKey,setListFilterKey]=useState('');
   const [detail, setDetail] = useState<NoteDetail | null>(null), [query, setQuery] = useState(''), [tag, setTag] = useState(''), [trash, setTrash] = useState(false);
   const [status, setStatus] = useState<'saved'|'dirty'|'saving'|'error'>('saved'), [operation, setOperation] = useState(false), [switching, setSwitching] = useState(true), [importing, setImporting] = useState(false);
+  const days=useImportantDays(api,operation);
+  const [dayDialog,setDayDialog]=useState<ImportantDay|'new'|null>(null);
+  const dayCloseRequest=useRef<DayCloseHandler|null>(null);
   const [toast, setToast] = useState<{ message: string; error?: boolean } | null>(null), [menu, setMenu] = useState(false), [noteMenu, setNoteMenu] = useState(false), [help, setHelp] = useState(false);
   const [info, setInfo] = useState<AppInfo | null>(null), [zoom, setZoom] = useState<string | null>(null), [tagInput, setTagInput] = useState(''), [, forceToolbar] = useState(0);
   const [linkValue, setLinkValue] = useState<string | null>(null);
@@ -192,6 +198,10 @@ export default function App() {
     if(blocked)return;setSwitching(true);
     try{if(!await flush())return;clearSelection();setContext(null);setNoteMenu(false);setLayout(p=>({...p,view:'home',focused:false}));setInfo(await api.info());}catch(e){report(e);}finally{setSwitching(false);}
   }
+  async function openImportantDays(entry?:ImportantDay){
+    if(blocked)return;setSwitching(true);
+    try{if(!await flush())return;clearSelection();setMenu(false);setContext(null);setNoteMenu(false);setLayout(p=>({...p,view:'days',focused:false}));if(entry)setDayDialog(entry);await days.refresh();}catch(e){report(e);}finally{setSwitching(false);}
+  }
   async function newNote() {
     if (blocked) return;
     clearSelection();setContext(null);
@@ -213,7 +223,7 @@ export default function App() {
   }
   async function searchRecords(){
     if(blocked)return;focusEditor.current=false;
-    if(layout.view==='home'){searchPending.current=true;if(!await changeView(false,'',true))searchPending.current=false;}
+    if(layout.view==='home'||layout.view==='days'){searchPending.current=true;if(!await changeView(false,'',true))searchPending.current=false;}
     else if(layout.view==='document'&&(layout.focused||layout.indexHidden)){searchPending.current=true;setLayout(p=>({...p,focused:false,indexHidden:false}));}
     else{searchInput.current?.focus();searchInput.current?.select();}
   }
@@ -295,7 +305,7 @@ export default function App() {
   useLayoutEffect(()=>{if(searchPending.current&&layout.view!=='home'&&!switching){searchPending.current=false;focusEditor.current=false;searchInput.current?.focus();searchInput.current?.select();return;}if(focusEditor.current&&layout.view==='document'&&!switching){focusEditor.current=false;editor?.view.focus();}},[layout.focused,layout.indexHidden,layout.view,switching,editor]);
   useEffect(()=>{if(!context)return;const close=()=>setContext(null);window.addEventListener('resize',close);listArea.current?.addEventListener('scroll',close);return()=>{window.removeEventListener('resize',close);listArea.current?.removeEventListener('scroll',close);};},[context]);
   useEffect(() => {
-    const offClose = api.onCloseRequested(() => { void (async () => { if (await flushRef.current()) await api.readyToClose(); })(); });
+    const offClose = api.onCloseRequested(() => { const close=()=>{void (async () => { if (await flushRef.current()) await api.readyToClose(); })();};if(dayCloseRequest.current)dayCloseRequest.current(close);else close(); });
     const offOperation = api.onOperation(setOperation);
     return () => { offClose(); offOperation(); };
   }, []);
@@ -303,6 +313,7 @@ export default function App() {
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if (e.isComposing) return;
+      if(dayCloseRequest.current)return;
       if ((e.ctrlKey || e.metaKey) && !e.altKey) {
         const key = e.key.toLowerCase();
         if (key === 's') { e.preventDefault(); void flushRef.current(); }
@@ -316,29 +327,34 @@ export default function App() {
 
   const note = detail?.note, files = detail?.attachments.filter(a => a.kind === 'file') ?? [];
   const resumeNote=homeNotes.find(n=>n.id===lastOpened);
-  const inHome=layout.view==='home',inLibrary=layout.view==='library',inDocument=layout.view==='document',indexVisible=inLibrary||(inDocument&&!layout.indexHidden&&!layout.focused);
+  const inHome=layout.view==='home',inDays=layout.view==='days',inLibrary=layout.view==='library',inDocument=layout.view==='document',indexVisible=inLibrary||(inDocument&&!layout.indexHidden&&!layout.focused);
+  useEffect(()=>{
+    if((!inHome&&!inDays)||!days.pending.length||operation||document.visibilityState==='hidden'||!document.hasFocus())return;
+    void days.acknowledge(days.pending.map(r=>r.key)).catch(report);
+  },[inHome,inDays,days.pending,days.now,operation]);
+  const reminderEntry=days.entries.find(d=>d.id===days.pending[0]?.dayId);
   const compactLibrary=layout.libraryHeaderHeight<=LIBRARY_HEADER.compactBelow;
   const saveStatus=<div className={`save-state ${status}`} role="status" aria-live="polite">
     {operation||importing||status==='saving'?<LoaderCircle size={13} className="spin"/>:status==='error'?<CircleAlert size={13}/>:<Check size={13}/>}
     <span>{operation?'正在处理数据…':importing?'正在保存附件…':status==='saved'?'所有更改已保存':status==='dirty'?'等待保存…':status==='saving'?'正在保存…':'保存失败'}</span>
     {status==='error'&&<button onClick={()=>void flush()}>重试保存</button>}
   </div>;
-  return <div className={`app-shell ${inHome?'home-mode':inLibrary?'library-mode':'document-mode'} ${inDocument&&layout.focused?'is-focused':''} ${layout.filtersCollapsed?'filters-collapsed':''} ${compactLibrary?'library-compact':''}`} style={layoutStyle} onClick={()=>{if(menu)setMenu(false);if(noteMenu)setNoteMenu(false);if(context)setContext(null);}}>
+  return <div className={`app-shell ${inHome?'home-mode':inDays?'days-mode':inLibrary?'library-mode':'document-mode'} ${inDocument&&layout.focused?'is-focused':''} ${layout.filtersCollapsed?'filters-collapsed':''} ${compactLibrary?'library-compact':''}`} style={layoutStyle} onClick={()=>{if(menu)setMenu(false);if(noteMenu)setNoteMenu(false);if(context)setContext(null);}}>
     <header className="app-navigation" aria-label="主导航">
       <div className="app-brand"><img src={appMark} alt="" draggable={false}/><strong>随手记</strong></div>
       <nav className="space-tabs" aria-label="记录空间">
         <button aria-label="首页" aria-current={inHome?'page':undefined} className={inHome?'current':''} disabled={blocked} onClick={()=>void openHome()}>首页</button>
-        <button aria-label="全部记录" aria-current={!inHome&&!trash?'page':undefined} className={!inHome&&!trash?'current':''} disabled={blocked} onClick={()=>void changeView(false,'',true)}>手记库 {!inHome&&<small>{overview.active}</small>}</button>
-        <button aria-label="回收站" aria-current={!inHome&&trash?'page':undefined} className={!inHome&&trash?'current':''} disabled={blocked} onClick={()=>void changeView(true,'',true)}>回收站{!inHome&&overview.trash>0&&<small>{overview.trash}</small>}</button>
+        <button aria-label="全部记录" aria-current={(inLibrary||inDocument)?'page':undefined} className={inLibrary||inDocument?'current':''} disabled={blocked} onClick={()=>void changeView(false,'',true)}>手记库 {(inLibrary||inDocument)&&<small>{overview.active}</small>}</button>
+        <button aria-label="重要日子" aria-current={inDays?'page':undefined} className={inDays?'current':''} disabled={blocked} onClick={()=>void openImportantDays()}>重要日子</button>
       </nav>
       <div className="navigation-tools">
-        {!inHome&&<button className="new-button" aria-label="新建记录" title="新建记录 Ctrl+N" disabled={blocked} onClick={()=>void newNote()}><Plus size={17}/><span>新建记录</span><kbd>Ctrl N</kbd></button>}
+        {(inLibrary||inDocument)&&<button className="new-button" aria-label="新建记录" title="新建记录 Ctrl+N" disabled={blocked} onClick={()=>void newNote()}><Plus size={17}/><span>新建记录</span><kbd>Ctrl N</kbd></button>}
         <div className="settings-anchor"><IconButton title="数据与设置" disabled={blocked} onClick={()=>setMenu(!menu)}><Settings2 size={19}/></IconButton>
           {menu&&<div className="dropdown settings-menu" onClick={e=>e.stopPropagation()}>
             <div className="menu-heading">本地资料管理</div>
             <div className="settings-summary" aria-label="资料近况"><span><b data-testid="settings-total">{overview.active}</b> 条手记 · 近7天更新 <b data-testid="home-week">{homeSnapshot(homeNotes,lastOpened,new Date()).updatedThisWeek}</b> 条</span><span className="settings-backup-state">{info?.lastBackup?`最近备份：${fullDate(info.lastBackup)}`:'暂无备份'}</span>{info?.backupWarning&&<p className="danger">{info.backupWarning}</p>}</div>
             <button onClick={()=>void act(()=>api.backup(),'备份已保存，可将备份复制到U盘')}><Download/>备份全部数据</button>
-            <button onClick={()=>void act(async()=>{const restored=await api.restoreBackup();if(restored){setUndo(null);clearSelection();}return restored;},'备份已恢复',true)}><ArchiveRestore/>从备份恢复</button>
+            <button onClick={()=>void act(async()=>{const restored=await api.restoreBackup();if(restored){setUndo(null);clearSelection();await days.refresh();}return restored;},'备份已恢复',true)}><ArchiveRestore/>从备份恢复</button>
             <button onClick={()=>void act(()=>api.exportNotes(),'已导出为可直接查看的网页')}><Upload/>导出全部记录</button><div className="menu-line"/>
             <button onClick={()=>{setMenu(false);void changeView(true,'',true);}}><Trash2/>查看回收站{overview.trash>0?`（${overview.trash} 条）`:''}</button>
             <button onClick={()=>void api.openDataDir().catch(report)}><FolderOpen/>打开数据文件夹</button>
@@ -348,7 +364,8 @@ export default function App() {
       </div>
     </header>
     <div className="workbench">
-      {inHome&&<Home notes={homeNotes} lastId={lastOpened} info={info} busy={blocked} loaded={homeLoaded} onOpen={id=>void openNote(id)} onNew={()=>void newNote()} onBrowse={()=>void changeView(false,'',true)} onRetry={()=>void openHome()}/>}
+      {inHome&&<Home notes={homeNotes} lastId={lastOpened} info={info} busy={blocked} loaded={homeLoaded} onOpen={id=>void openNote(id)} onNew={()=>void newNote()} onBrowse={()=>void changeView(false,'',true)} onRetry={()=>void openHome()} days={days.entries} dayNow={days.now} onDay={entry=>void openImportantDays(entry)}/>}
+      {inDays&&<ImportantDaysPage entries={days.entries} now={days.now} error={days.error} loaded={days.loaded} busy={blocked} onAdd={()=>setDayDialog('new')} onOpen={setDayDialog} onRetry={()=>void days.refresh()}/>}
       <section className="notes-panel" aria-label={inLibrary?'手记库':'记录目录'} hidden={!indexVisible}>
         <div className="collection-heading" ref={libraryHeading}>
           <div><div className="section-overline">{trash?'已删除的记录':'文字 · 图片 · 文件'}</div><h1 title={tag||undefined}>{trash?'回收站':tag?tag:'手记库'}<span>{list.length} 条记录</span></h1><p>{trash?'留在这里，仍然可以找回。':'把值得留下的，放在一起。'}</p></div>
@@ -409,7 +426,9 @@ export default function App() {
         </>:<div className="document-empty"><span className="section-overline">书写页</span><h2>准备记点什么？</h2><p>从手记库选择一条记录，或新建一页。</p><button onClick={()=>void newNote()} disabled={blocked}>新建记录 <ArrowRight size={16}/></button></div>}
       </main>
     </div>
-    <footer className="app-status"><span><HardDrive size={12}/><span>本地存储</span><b>·</b>{inHome?'首页':inLibrary?'手记库':layout.focused?'专注书写':'书写页'}</span>{saveStatus}<span className="status-hint">{inHome||inLibrary?'Ctrl N 新建 · Ctrl F 查找':note?.deletedAt?'回收站 · 只读':`${note?.plainText.replace(/\s/g,'').length??0} 字 · Ctrl S 保存`}</span></footer>
+    <footer className="app-status"><span><HardDrive size={12}/><span>本地存储</span><b>·</b>{inHome?'首页':inDays?'重要日子':inLibrary?(trash?'回收站':'手记库'):layout.focused?'专注书写':'书写页'}</span>{saveStatus}<span className="status-hint">{inDays?'应用内提醒 · 关闭后不提醒':inHome||inLibrary?'Ctrl N 新建 · Ctrl F 查找':note?.deletedAt?'回收站 · 只读':`${note?.plainText.replace(/\s/g,'').length??0} 字 · Ctrl S 保存`}</span></footer>
+    {dayDialog&&<ImportantDayDialog entry={dayDialog} api={api} closeRequest={dayCloseRequest} onSaved={days.refresh} onClose={()=>setDayDialog(null)}/>}
+    {!inHome&&!inDays&&!dayDialog&&!operation&&!toast&&!undo&&reminderEntry&&<div className="day-reminder" role="status"><button onClick={()=>void openImportantDays(reminderEntry)}><span>{reminderEntry.name} · {dayDistance(occurrence(reminderEntry,days.now).days)}{days.pending.length>1?`，另有${days.pending.length-1}个重要日子`:''}</span><ArrowUpRight size={14}/></button><button aria-label="收起日子提醒" onClick={()=>void days.acknowledge(days.pending.map(r=>r.key)).catch(report)}><X size={14}/></button></div>}
 
     {context&&<div className="dropdown context-menu" role="menu" aria-label="记录右键菜单" style={{left:Math.max(8,context.x),top:Math.max(8,context.y)}} onClick={e=>e.stopPropagation()} onKeyDown={e=>{if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();const buttons=[...e.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')],at=buttons.indexOf(document.activeElement as HTMLButtonElement);buttons[(at+(e.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length]?.focus();}}}>
       {!trash&&context.ids.length===1&&<><button role="menuitem" onClick={()=>contextPin(context.ids[0])}><Pin/>{list.find(n=>n.id===context.ids[0])?.pinned?'取消置顶':'置顶记录'}</button><button role="menuitem" onClick={()=>void act(()=>api.exportNotes(context.ids[0]),'记录已导出')}><Upload/>导出记录</button></>}
@@ -429,7 +448,8 @@ export default function App() {
       <p>选中正文后按 <strong>Ctrl+Shift+C</strong> 复制为纯文本，按 <strong>Ctrl+Shift+V</strong> 粘贴为纯文本；也可右键正文或点击工具栏“纯文本”。去掉来源格式并保留换行，粘贴位置已有的段落或列表布局会保留。记录右上角“更多记录操作”可复制全文纯文本，包含标题和正文，不包含图片及附件。原有 Ctrl+C / Ctrl+V 保留格式复制和粘贴。</p>
       <p>列表上方点击“多选”，或按住 Ctrl 点击记录。Shift 点击连续选择；全选只选中当前筛选结果。在列表中按 Delete 可以删除所选记录，输入文字时仍按正常文字编辑处理。</p>
       <p>移入回收站后，右下角有 10 秒“撤销”。回收站可批量恢复或永久删除；右键记录也有常用操作。</p>
-      <p>每次打开先进入首页，点击“写点什么”开始一条新记录，或从下方继续写、回顾最近内容；不会自动新建空白页。资料数量和备份详情位于右上角“数据与设置”。顶部“首页”“手记库”和“回收站”用于切换空间。首页按Ctrl+F可进入手记库并聚焦搜索；书写页点击“首页”会先完成保存。</p>
+      <p>每次打开先进入首页，点击“写点什么”开始一条新记录，或从下方继续写、回顾最近内容；不会自动新建空白页。顶部“首页”“手记库”和“重要日子”用于切换空间。回收站、资料数量和备份详情位于右上角“数据与设置”。首页按Ctrl+F可进入手记库并聚焦搜索；离开书写页会先完成保存。</p>
+      <p>重要日子支持公历日期，可每年重复，年份可以留空；不重复时需要年份。默认提前14天及当天在应用内提醒，首页日期附近只在临近时展示。关闭软件后不会提醒；每年2月29日在平年按2月最后一天提醒。重要日子与手记一起完整备份，农历将后续支持。</p>
       <p>手记库按行展示记录，点击一行进入书写页；左上角“手记库”可返回完整索引。标签筛选、排序和多选位于索引上方。“数据与设置”中的“近7天更新”按本地日期统计今天及前六天，最近更新按实际修改时间排列，不受置顶、搜索或标签筛选影响。</p>
       <p>手记库表头下方的分隔线可上下拖动，向上压缩标题区即可看到更多记录；双击恢复默认，也可用上下方向键调整。“紧凑视图”一次缩小标题区及行距，点击“舒展视图”还原。搜索、筛选和表头保持可用，选择会自动记住。</p>
       <p>书写页上方的目录按钮可打开记录目录；拖动目录右边的分隔线调整宽度，双击恢复默认。专注模式隐藏顶部导航和目录，再次点击恢复。Ctrl+F 自动打开目录并聚焦搜索。目录宽度、筛选收起状态、排序和窗口大小都会记住。</p>

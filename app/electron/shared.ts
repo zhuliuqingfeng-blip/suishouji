@@ -12,10 +12,19 @@ export interface Filter { query?: string; tag?: string; trash?: boolean; sort?: 
 export interface BatchResult { succeeded: string[]; failed: { id: string; error: string }[]; cancelled?: boolean; warnings?: string[]; undo?: { token: string; expiresAt: number } }
 export interface Overview { active: number; trash: number; tags: { name: string; count: number }[] }
 export interface AppInfo { dataDir: string; version: string; lastBackup: string | null; backupWarning: string | null }
+export interface ImportantDayInput {
+  id?: string; name: string; calendar: 'solar'; year: number | null; month: number; day: number;
+  yearly: boolean; reminderDays: number; note: string;
+}
+export interface ImportantDay extends ImportantDayInput { id: string; createdAt: string; updatedAt: string }
+export interface DayReminder { key: string; dayId: string; occurrence: string; stage: 'advance' | 'today' }
 export type Result<T> = { ok: true; data: T } | { ok: false; error: string };
 export type TextMenuAction = 'copyPlain' | 'pastePlain' | 'copyAllPlain';
 export interface TextMenuOptions { mode: 'context' | 'toolbar'; hasSelection: boolean; hasText: boolean; editable: boolean; x: number; y: number }
 export interface NotesAPI {
+  listImportantDays(): Promise<ImportantDay[]>; saveImportantDay(input: ImportantDayInput): Promise<ImportantDay>;
+  removeImportantDay(id: string): Promise<void>; pendingDayReminders(): Promise<DayReminder[]>;
+  acknowledgeDayReminders(keys: string[]): Promise<void>;
   list(filter: Filter): Promise<NoteSummary[]>; overview(): Promise<Overview>;
   create(): Promise<NoteDetail>; get(id: string): Promise<NoteDetail>; save(input: NoteInput): Promise<Note>;
   pin(id: string, pinned: boolean): Promise<void>; trash(id: string): Promise<void>; restoreNote(id: string): Promise<void>;

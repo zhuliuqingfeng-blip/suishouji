@@ -60,7 +60,7 @@ try {
   await page.getByLabel('网页地址').fill('https://example.com'); await page.getByRole('button',{name:'确定',exact:true}).click();
   await page.keyboard.insertText('一个网页'); await page.keyboard.press('Control+s'); await page.waitForTimeout(650);
   await page.getByRole('button',{name:'更多记录操作',exact:true}).click(); await page.getByRole('button',{name:'移到回收站',exact:true}).click();
-  await page.getByRole('button',{name:/回收站/}).first().click();await page.locator('.note-card').first().click(); await page.getByRole('button',{name:'恢复记录',exact:true}).click();
+  await page.getByRole('button',{name:'数据与设置',exact:true}).click();await page.getByRole('button',{name:/^查看回收站/}).click();await page.locator('.note-card').first().click(); await page.getByRole('button',{name:'恢复记录',exact:true}).click();
   await page.getByRole('button',{name:/全部记录/}).first().click();await page.locator('.note-card').first().click(); await page.getByLabel('记录标题').waitFor();
   const backup=path.join(root,'完整备份.zip');
   await application.evaluate(({dialog},file)=>{dialog.showSaveDialog=async()=>({canceled:false,filePath:file});},backup);
