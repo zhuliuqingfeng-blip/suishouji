@@ -1,6 +1,6 @@
 {
   "name": "suishouji",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "private": true,
   "description": "完全保存在本地的个人图文随手记",
   "author": "Local Notes",
@@ -24,7 +24,8 @@
     "test:library": "node scripts/library-height-test.mjs",
     "test:home": "node scripts/home-test.mjs",
     "test:days": "node scripts/important-days-test.mjs",
-    "test:lunar": "node scripts/lunar-ui-test.mjs"
+    "test:lunar": "node scripts/lunar-ui-test.mjs",
+    "test:numbering": "node scripts/numbering-ui-test.mjs"
   },
   "build": {
     "appId": "local.suishouji.desktop",
@@ -54,6 +55,7 @@
   },
   "devDependencies": {
     "@tiptap/extension-image": "^3.32.0",
+    "@tiptap/extension-ordered-list": "3.32.0",
     "@tiptap/extension-placeholder": "^3.32.0",
     "@tiptap/react": "^3.32.0",
     "@tiptap/starter-kit": "^3.32.0",

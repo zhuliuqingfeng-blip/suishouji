@@ -150,6 +150,7 @@ function renderNode(node: RichNode, assets: Map<string, string>): string {
   if (node.type === 'image') { const file = assets.get(String(node.attrs?.assetId)); return file ? `<img src="${escapeHtml(file)}" alt="${escapeHtml(node.attrs?.alt)}" style="width:${Number(node.attrs?.width) || 560}px;max-width:100%;height:auto">` : ''; }
   if (node.type === 'hardBreak') return '<br>'; if (node.type === 'horizontalRule') return '<hr>';
   const content = (node.content ?? []).map(n => renderNode(n, assets)).join('');
+  if(node.type==='orderedList'){const start=Number(node.attrs?.start);return `<ol${Number.isSafeInteger(start)&&start>1?` start="${start}"`:''}>${content}</ol>`;}
   const tag = node.type === 'heading' ? `h${Math.min(3, Math.max(1, Number(node.attrs?.level) || 2))}` : ({ paragraph: 'p', bulletList: 'ul', orderedList: 'ol', listItem: 'li', blockquote: 'blockquote', codeBlock: 'pre' } as Record<string, string>)[node.type ?? ''];
   return tag ? `<${tag}>${content}</${tag}>` : content;
 }

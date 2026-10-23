@@ -14,6 +14,8 @@ import {homeSnapshot,noteTitle} from './home-model';
 import {ImportantDaysPage,ImportantDayDialog,useImportantDays,type DayCloseHandler} from './ImportantDays';
 import type {ImportantDay} from '../electron/shared';
 import {dayDistance,occurrence} from '../electron/important-days';
+import {ContinuousOrderedList} from './numbering';
+import {NumberingControl} from './NumberingControl';
 
 const LocalImage = Image.extend({
   addAttributes() { return { ...this.parent?.(), assetId: { default: null }, width: { default: 560, renderHTML: attrs => ({ width: attrs.width, style: `max-width:100%;width:${attrs.width}px;height:auto` }) } }; }
@@ -66,7 +68,7 @@ export default function App() {
   function toggleSelection(id:string,range=false){if(listPending)return;setSelecting(true);setChecked(previous=>rangeSelection(list.map(n=>n.id),previous,id,anchor.current,range));if(!range||!anchor.current)anchor.current=id;}
   function openContext(event:React.MouseEvent,id:string){event.preventDefault();event.stopPropagation();if(blocked||listPending)return;const ids=selecting&&checked.has(id)?[...checked]:[id];if(selecting&&!checked.has(id))setChecked(new Set([id]));setContext({x:Math.min(event.clientX,window.innerWidth-230),y:Math.min(event.clientY,window.innerHeight-240),ids});}
   const editor = useEditor({
-    extensions: [StarterKit.configure({ heading: { levels: [1,2,3] }, link: { openOnClick: false, autolink: false, protocols: ['http','https'] } }), LocalImage, Placeholder.configure({ placeholder: '在这里写下想记住的事…\n也可以粘贴截图，或把文件拖进来。' })],
+    extensions: [StarterKit.configure({ orderedList:false,heading: { levels: [1,2,3] }, link: { openOnClick: false, autolink: false, protocols: ['http','https'] } }),ContinuousOrderedList, LocalImage, Placeholder.configure({ placeholder: '在这里写下想记住的事…\n也可以粘贴截图，或把文件拖进来。' })],
     editorProps: {
       attributes: { 'aria-label': '记录正文', class: 'note-prose', tabindex: '0' },
       scrollThreshold: { top: 30, bottom: 24, left: 10, right: 10 },
@@ -411,7 +413,7 @@ export default function App() {
         {note?<>
           <div className="toolbar" role="toolbar" aria-label="文字格式">
             <span className="tool-label">文字</span><IconButton title="标题" active={editor?.isActive('heading')} disabled={readOnly} onClick={()=>editor?.chain().focus().toggleHeading({level:2}).run()}><Heading2 size={18}/></IconButton><IconButton title="加粗 Ctrl+B" active={editor?.isActive('bold')} disabled={readOnly} onClick={()=>editor?.chain().focus().toggleBold().run()}><Bold size={16}/></IconButton><IconButton title="斜体 Ctrl+I" active={editor?.isActive('italic')} disabled={readOnly} onClick={()=>editor?.chain().focus().toggleItalic().run()}><Italic size={16}/></IconButton><i/>
-            <span className="tool-label">段落</span><IconButton title="项目列表" active={editor?.isActive('bulletList')} disabled={readOnly} onClick={()=>editor?.chain().focus().toggleBulletList().run()}><List size={18}/></IconButton><IconButton title="编号列表" active={editor?.isActive('orderedList')} disabled={readOnly} onClick={()=>editor?.chain().focus().toggleOrderedList().run()}><ListOrdered size={18}/></IconButton><IconButton title="插入网页链接" active={editor?.isActive('link')} disabled={readOnly} onClick={()=>setLinkValue(editor?.getAttributes('link').href??'https://')}><Link size={16}/></IconButton><i/>
+            <span className="tool-label">段落</span><IconButton title="项目列表" active={editor?.isActive('bulletList')} disabled={readOnly} onClick={()=>editor?.chain().focus().toggleBulletList().run()}><List size={18}/></IconButton><NumberingControl editor={editor} disabled={readOnly}/><IconButton title="插入网页链接" active={editor?.isActive('link')} disabled={readOnly} onClick={()=>setLinkValue(editor?.getAttributes('link').href??'https://')}><Link size={16}/></IconButton><i/>
             <IconButton title="添加图片或附件" disabled={readOnly} onClick={()=>void pickFiles()}><ImagePlus size={17}/></IconButton><button type="button" className="plain-text-trigger" aria-label="纯文本复制与粘贴" title="纯文本复制与粘贴" aria-haspopup="menu" aria-expanded={textMenuOpen} disabled={blocked||clipboardBusy} onMouseDown={e=>e.preventDefault()} onClick={e=>{e.stopPropagation();const r=e.currentTarget.getBoundingClientRect();void showTextMenu('toolbar',r.left,r.bottom+4);}}><ClipboardType size={16}/><span>纯文本</span><ChevronDown size={12}/></button>
             <span className="toolbar-spacer"/><div className="toolbar-history"><IconButton title="撤销 Ctrl+Z" disabled={readOnly||!editor?.can().undo()} onClick={()=>editor?.chain().focus().undo().run()}><Undo2 size={16}/></IconButton><IconButton title="重做 Ctrl+Y" disabled={readOnly||!editor?.can().redo()} onClick={()=>editor?.chain().focus().redo().run()}><Redo2 size={16}/></IconButton></div>
           </div>
