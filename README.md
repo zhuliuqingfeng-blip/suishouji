@@ -4,7 +4,7 @@
 
 ## 下载和使用
 
-**[下载最新 Windows 免安装版](https://github.com/zhuliuqingfeng-blip/suishouji/releases/latest)**。仓库为私有，请先登录有访问权限的 GitHub 账号。
+**[下载最新 Windows 免安装版](https://github.com/zhuliuqingfeng-blip/suishouji/releases/latest)**。无需登录 GitHub，完整解压后即可运行。
 
 1. 在发行页面的 **Assets** 中下载 `suishouji-版本号-windows-x64.zip`。
 2. 将整个 ZIP 解压到一个可写入的文件夹，双击其中的 `随手记/随手记.exe`。无需安装 Node.js 或数据库。
@@ -13,6 +13,10 @@
 GitHub 的 **Code → Download ZIP** 以及发行页面中的 **Source code** 下载的是源码；运行软件请选择上面的 Windows 软件包。
 
 个人记录保存在解压后的软件文件夹内的“我的数据”中；也可以在正常关闭软件后复制整个软件文件夹到另一台 Windows 64 位电脑。GitHub 不会自动同步个人记录。
+
+## 许可说明
+
+本项目暂未指定开源许可证。第三方依赖仍适用各自许可证，农历库的许可文本保留在 [第三方许可](app/assets/third-party/lunar-typescript-LICENSE.txt) 中。
 
 ## 仓库目录
 
