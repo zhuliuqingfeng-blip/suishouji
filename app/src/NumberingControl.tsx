@@ -16,7 +16,7 @@ export function NumberingControl({editor,disabled}:{editor:Editor|null;disabled:
   },[open]);
   useEffect(()=>{setOpen(false);},[disabled,editor?.state.doc]);
   return <div className="numbering-control" ref={anchor}>
-    <button type="button" className={`icon-button ${editor?.isActive('orderedList')?'active':''}`} title="编号列表：分散段落默认接着前面编号" aria-label="编号列表" aria-pressed={!!editor?.isActive('orderedList')} disabled={disabled} onMouseDown={e=>e.preventDefault()} onClick={()=>{setOpen(false);editor?.chain().focus().toggleOrderedList().run();}}><ListOrdered size={18}/></button>
+    <button type="button" className={`icon-button ${active?'active':''}`} title="编号列表：分散段落默认接着前面编号" aria-label="编号列表" aria-pressed={!!active} disabled={disabled} onMouseDown={e=>e.preventDefault()} onClick={()=>{setOpen(false);editor?.chain().focus().toggleOrderedList().run();}}><ListOrdered size={18}/></button>
     <button type="button" className="numbering-chevron" aria-label="编号选项" title="编号选项" ref={trigger} disabled={disabled} aria-haspopup="menu" aria-expanded={open} onMouseDown={e=>e.preventDefault()} onClick={()=>setOpen(value=>!value)}><ChevronDown size={11}/></button>
     {open&&<div className="numbering-menu" role="menu" aria-label="编号选项" onMouseDown={e=>e.preventDefault()}>
       <button role="menuitem" disabled={!canContinue} onClick={()=>{editor?.chain().focus().continueNumbering().run();setOpen(false);}}><ArrowRight size={14}/><span>继续前面编号</span></button>

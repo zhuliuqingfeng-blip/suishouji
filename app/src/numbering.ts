@@ -1,7 +1,6 @@
 import OrderedList from '@tiptap/extension-ordered-list';
-import {isNodeActive} from '@tiptap/core';
 import type {Node as ProseMirrorNode} from '@tiptap/pm/model';
-import {Plugin,PluginKey,type EditorState} from '@tiptap/pm/state';
+import {Plugin,PluginKey,TextSelection,type EditorState,type Transaction} from '@tiptap/pm/state';
 import {closeHistory} from '@tiptap/pm/history';
 import {canJoin} from '@tiptap/pm/transform';
 
@@ -46,7 +45,25 @@ export function numberingChanges(doc:ProseMirrorNode){
   visit(doc,0);return changes;
 }
 const normalizationKey=new PluginKey('continuous-numbering');
-function joinPreviousGroup(tr:import('@tiptap/pm/state').Transaction){
+// Lifting a middle item copies the original list attributes onto both halves.
+// Only the surviving suffix of that same list becomes a continuation; existing
+// independent lists and halves moved to different nested parents stay intact.
+export function continueSplitSuffix(tr:Transaction,source:{node:ProseMirrorNode;pos:number},stepStart=0){
+  if(!numeric(source.node)||source.node.childCount<3)return;
+  const mapping=tr.mapping.slice(stepStart);
+  const contextAt=(position:number)=>{
+    const mapped=mapping.mapResult(position);
+    if(mapped.deletedAcross||!tr.doc.resolve(mapped.pos).parent.inlineContent)return null;
+    return listContext({doc:tr.doc,selection:TextSelection.create(tr.doc,mapped.pos)});
+  };
+  // Map positions inside the first paragraph of the first/last original item.
+  // Earlier steps in a chained command already precede these source positions.
+  const first=contextAt(source.pos+3);
+  const last=contextAt(source.pos+source.node.nodeSize-source.node.lastChild!.nodeSize+1);
+  if(!first?.list||!last?.list||first.parent!==last.parent||first.index>=last.index||!numeric(first.list.node)||!numeric(last.list.node))return;
+  tr.setNodeMarkup(last.list.pos,undefined,{...last.list.node.attrs,continuePrevious:true});
+}
+function joinPreviousGroup(tr:Transaction){
   const current=listContext({doc:tr.doc,selection:tr.selection}).list;
   if(!current||!numeric(current.node))return true;
   const before=tr.doc.resolve(current.pos).nodeBefore;
@@ -79,11 +96,15 @@ export const ContinuousOrderedList=OrderedList.extend({
     return {...parent,
       toggleOrderedList:()=>props=>{
         if(!props.editor.isEditable)return false;
-        const wasActive=isNodeActive(props.state,this.name),previous=previousNumberedList(props.state);
+        const current=listContext(props.state).list,wasActive=current?.node.type.name===this.name,previous=previousNumberedList(props.state);
         if(props.dispatch)closeHistory(props.tr);
-        if(wasActive)return parent?.toggleOrderedList?.()(props)??false;
+        if(wasActive){
+          const stepStart=props.tr.steps.length,result=parent?.toggleOrderedList?.()(props)??false;
+          if(result&&props.dispatch&&current)continueSplitSuffix(props.tr,current,stepStart);
+          return result;
+        }
         const attributes={start:previous?listStart(previous.node)+previous.node.childCount:1,continuePrevious:!!previous};
-        const current=listContext(props.state).list,type=props.state.schema.nodes[this.name],range=props.state.selection.$from.blockRange(props.state.selection.$to);
+        const type=props.state.schema.nodes[this.name],range=props.state.selection.$from.blockRange(props.state.selection.$to);
         const wholeDocList=props.state.doc.childCount===1&&props.state.selection.from===0&&props.state.selection.to===props.state.doc.content.size;
         if(current?.node.type.name==='bulletList'&&type.validContent(current.node.content)&&(wholeDocList||range&&range.depth>=1&&range.depth-props.tr.doc.resolve(current.pos).depth-1<=1)){
           if(props.dispatch){props.tr.setNodeMarkup(current.pos,type,attributes);joinPreviousGroup(props.tr);}

@@ -25,7 +25,8 @@
     "test:home": "node scripts/home-test.mjs",
     "test:days": "node scripts/important-days-test.mjs",
     "test:lunar": "node scripts/lunar-ui-test.mjs",
-    "test:numbering": "node scripts/numbering-ui-test.mjs"
+    "test:numbering": "node scripts/numbering-ui-test.mjs",
+    "test:numbering-boundaries": "node scripts/numbering-boundaries-test.mjs"
   },
   "build": {
     "appId": "local.suishouji.desktop",

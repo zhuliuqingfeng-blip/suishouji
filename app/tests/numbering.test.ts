@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import {Schema,type Node} from '@tiptap/pm/model';
 import {EditorState,TextSelection} from '@tiptap/pm/state';
 import {history,undo,redo} from '@tiptap/pm/history';
+import {liftListItem} from '@tiptap/pm/schema-list';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {continuationPlugin,numberingChanges,previousNumberedList} from '../src/numbering.js';
+import {continuationPlugin,numberingChanges,previousNumberedList,listContext,continueSplitSuffix} from '../src/numbering.js';
 import {Store} from '../electron/store.js';
 import {createBackup,validateBackup,applyRestore,exportHtml} from '../electron/archive.js';
 import {testRoot} from '../scripts/paths.mjs';
@@ -52,6 +53,43 @@ test('前面增删项目自动更新后续编号，撤销和重做一次完成�
   apply(state.tr.insert(original.firstChild!.nodeSize-1,li('新增')));assert.deepEqual(starts(state.doc),[1,3]);
   assert.equal(undo(state,apply),true);assert.deepEqual(state.doc.toJSON(),original.toJSON());assert.equal(undo(state,apply),false);
   assert.equal(redo(state,apply),true);assert.deepEqual(starts(state.doc),[1,3]);
+});
+
+function lifted(original:Node,first:string,last=first){
+  let from=0,to=0;
+  original.descendants((node,pos)=>{if(node.type.name==='paragraph'){if(node.textContent===first)from=pos+1;if(node.textContent===last)to=pos+1+node.content.size;}});
+  assert.ok(from&&to,'测试段落必须存在');
+  let state=EditorState.create({schema,doc:original,selection:TextSelection.create(original,from,to),plugins:[history(),continuationPlugin()]});
+  const source=listContext(state).list!;
+  const apply=(tr:Parameters<EditorState['apply']>[0])=>{state=state.applyTransaction(tr).state;};
+  assert.equal(liftListItem(schema.nodes.listItem)(state,tr=>{continueSplitSuffix(tr,source);apply(tr);}),true);
+  return {get state(){return state;},undo:()=>undo(state,apply),redo:()=>redo(state,apply)};
+}
+test('取消中间项只接续原列表拆出的后半组，保留自定义起点和已有独立列表',()=>{
+  for(const start of [1,7]){
+    const original=doc([ol(start,false,[li('甲'),li('乙'),li('丙')]),p('说明'),ol(start+3,true,[li('丁')]),p('另一组'),ol(1,false,[li('独立一')]),p('说明'),ol(2,true,[li('独立二')])]);
+    const result=lifted(original,'乙');assert.deepEqual(starts(result.state.doc),[start,start+1,start+2,1,2]);assert.equal(result.state.doc.textContent,original.textContent);
+    assert.deepEqual(result.state.doc.content.content.filter(n=>n.type.name==='orderedList').map(n=>n.attrs.continuePrevious),[false,true,true,false,true]);
+    assert.equal(result.undo(),true);assert.deepEqual(result.state.doc.toJSON(),original.toJSON());assert.equal(result.redo(),true);assert.deepEqual(starts(result.state.doc),[start,start+1,start+2,1,2]);
+  }
+});
+test('取消连续多个中间项，已接续列表及引用内部也维持同层编号',()=>{
+  const multiple=doc([ol(1,false,['甲','乙','丙','丁','戊'].map(t=>li(t))),p('说明'),ol(6,true,[li('己')])]);
+  const result=lifted(multiple,'乙','丙');assert.deepEqual(starts(result.state.doc),[1,2,4]);assert.equal(result.state.doc.textContent,multiple.textContent);
+  const continued=doc([ol(5,false,[li('前五'),li('前六')]),p('说明'),ol(7,true,[li('甲'),li('乙'),li('丙')]),p('说明'),ol(10,true,[li('丁')])]);
+  assert.deepEqual(starts(lifted(continued,'乙').state.doc),[5,7,8,9]);
+  const quoted=doc([schema.nodes.blockquote.create(null,[ol(3,false,[li('甲'),li('乙'),li('丙')]),p('说明'),ol(6,true,[li('丁')])])]);
+  assert.deepEqual(starts(lifted(quoted,'乙').state.doc),[3,4,5]);
+});
+test('取消首尾项不改变独立起点；嵌套提级后不跨不同父级建立接续',()=>{
+  const original=doc([ol(7,false,[li('甲'),li('乙'),li('丙')]),p('说明'),ol(10,true,[li('丁')])]);
+  for(const selected of ['甲','丙']){
+    const result=lifted(original,selected);assert.deepEqual(starts(result.state.doc),[7,9]);assert.equal(result.state.doc.firstChild!.type.name,selected==='甲'?'paragraph':'orderedList');
+    const lists=result.state.doc.content.content.filter(n=>n.type.name==='orderedList');assert.equal(lists[0].attrs.continuePrevious,false);
+  }
+  const nested=doc([ol(30,false,[li('外层',[ol(7,false,[li('甲'),li('乙'),li('丙')])])])]);
+  const result=lifted(nested,'乙'),inner:Node[]=[];result.state.doc.descendants(node=>{if(node.type.name==='orderedList'&&node.attrs.start===7)inner.push(node);});
+  assert.equal(inner.length,2);assert.ok(inner.every(n=>n.attrs.continuePrevious===false));assert.equal(result.state.doc.textContent,nested.textContent);
 });
 test('读取旧文档不自动改写存储；存档、完整备份和HTML导出保留接续后的数字',async()=>{
   await fs.mkdir(testRoot,{recursive:true});const root=await fs.mkdtemp(path.join(testRoot,'numbering-')),store=new Store(root),note=store.create().note;
