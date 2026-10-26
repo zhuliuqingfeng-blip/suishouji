@@ -27,7 +27,7 @@ export function normalizeDocument(doc: RichNode, assets: Set<string>): RichNode 
       if (!assets.has(id)) throw new Error('图片尚未保存，请重新添加图片');
       clean.attrs = { assetId: id, src: `app-asset://media/${id}`, alt: String(node.attrs?.alt ?? ''), width: Math.max(80, Math.min(1600, Number(node.attrs?.width) || 560)) };
     } else if (node.type === 'heading') clean.attrs = { level: Math.max(1, Math.min(3, Number(node.attrs?.level) || 2)) };
-    else if (node.type === 'orderedList') clean.attrs = { start: Math.max(1, Number(node.attrs?.start) || 1) };
+    else if (node.type === 'orderedList') {const start=Number(node.attrs?.start);clean.attrs={start:Number.isSafeInteger(start)&&start>=1?start:1,continuePrevious:node.attrs?.continuePrevious===true};}
     if (node.marks) clean.marks = node.marks.filter(m => ['bold', 'italic', 'strike', 'code', 'underline', 'link'].includes(m.type)).flatMap(m => {
       if (m.type !== 'link') return [{ type: m.type }];
       const href = String(m.attrs?.href ?? '');
