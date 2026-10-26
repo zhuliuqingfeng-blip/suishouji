@@ -1,4 +1,5 @@
 import OrderedList from '@tiptap/extension-ordered-list';
+import {commands as baseCommands,type Command} from '@tiptap/core';
 import type {Node as ProseMirrorNode} from '@tiptap/pm/model';
 import {Plugin,PluginKey,TextSelection,type EditorState,type Transaction} from '@tiptap/pm/state';
 import {closeHistory} from '@tiptap/pm/history';
@@ -48,7 +49,7 @@ const normalizationKey=new PluginKey('continuous-numbering');
 // Lifting a middle item copies the original list attributes onto both halves.
 // Only the surviving suffix of that same list becomes a continuation; existing
 // independent lists and halves moved to different nested parents stay intact.
-export function continueSplitSuffix(tr:Transaction,source:{node:ProseMirrorNode;pos:number},stepStart=0){
+function continueSplitSuffix(tr:Transaction,source:{node:ProseMirrorNode;pos:number},stepStart=0){
   if(!numeric(source.node)||source.node.childCount<3)return;
   const mapping=tr.mapping.slice(stepStart);
   const contextAt=(position:number)=>{
@@ -63,6 +64,15 @@ export function continueSplitSuffix(tr:Transaction,source:{node:ProseMirrorNode;
   if(!first?.list||!last?.list||first.parent!==last.parent||first.index>=last.index||!numeric(first.list.node)||!numeric(last.list.node))return;
   tr.setNodeMarkup(last.list.pos,undefined,{...last.list.node.attrs,continuePrevious:true});
 }
+function numberedLift(command:Command):Command{return props=>{
+  if(!props.editor.isEditable)return false;
+  const source=listContext(props.state).list,stepStart=props.tr.steps.length;
+  const result=command(props);
+  if(result&&props.dispatch&&source&&numeric(source.node)){
+    closeHistory(props.tr);continueSplitSuffix(props.tr,source,stepStart);
+  }
+  return result;
+};}
 function joinPreviousGroup(tr:Transaction){
   const current=listContext({doc:tr.doc,selection:tr.selection}).list;
   if(!current||!numeric(current.node))return true;
@@ -94,15 +104,15 @@ export const ContinuousOrderedList=OrderedList.extend({
   addCommands(){
     const parent=this.parent?.();
     return {...parent,
+      // Share split repair across Shift+Tab, Backspace, toolbar, direct commands
+      // and Enter exiting an empty item; preserve upstream behavior otherwise.
+      liftListItem:typeOrName=>numberedLift(baseCommands.liftListItem(typeOrName)),
+      liftEmptyBlock:()=>numberedLift(baseCommands.liftEmptyBlock()),
       toggleOrderedList:()=>props=>{
         if(!props.editor.isEditable)return false;
         const current=listContext(props.state).list,wasActive=current?.node.type.name===this.name,previous=previousNumberedList(props.state);
         if(props.dispatch)closeHistory(props.tr);
-        if(wasActive){
-          const stepStart=props.tr.steps.length,result=parent?.toggleOrderedList?.()(props)??false;
-          if(result&&props.dispatch&&current)continueSplitSuffix(props.tr,current,stepStart);
-          return result;
-        }
+        if(wasActive)return parent?.toggleOrderedList?.()(props)??false;
         const attributes={start:previous?listStart(previous.node)+previous.node.childCount:1,continuePrevious:!!previous};
         const type=props.state.schema.nodes[this.name],range=props.state.selection.$from.blockRange(props.state.selection.$to);
         const wholeDocList=props.state.doc.childCount===1&&props.state.selection.from===0&&props.state.selection.to===props.state.doc.content.size;

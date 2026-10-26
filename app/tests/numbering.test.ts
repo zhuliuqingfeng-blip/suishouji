@@ -1,12 +1,13 @@
-import {test} from 'node:test';
+import {test,afterEach} from 'node:test';
 import assert from 'node:assert/strict';
+import {Editor} from '@tiptap/core';
+import StarterKit from '@tiptap/starter-kit';
 import {Schema,type Node} from '@tiptap/pm/model';
 import {EditorState,TextSelection} from '@tiptap/pm/state';
 import {history,undo,redo} from '@tiptap/pm/history';
-import {liftListItem} from '@tiptap/pm/schema-list';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {continuationPlugin,numberingChanges,previousNumberedList,listContext,continueSplitSuffix} from '../src/numbering.js';
+import {ContinuousOrderedList,continuationPlugin,numberingChanges,previousNumberedList} from '../src/numbering.js';
 import {Store} from '../electron/store.js';
 import {createBackup,validateBackup,applyRestore,exportHtml} from '../electron/archive.js';
 import {testRoot} from '../scripts/paths.mjs';
@@ -55,15 +56,20 @@ test('前面增删项目自动更新后续编号，撤销和重做一次完成�
   assert.equal(redo(state,apply),true);assert.deepEqual(starts(state.doc),[1,3]);
 });
 
-function lifted(original:Node,first:string,last=first){
+const editors:Editor[]=[];
+afterEach(()=>{for(const editor of editors.splice(0))editor.destroy();});
+function commandEditor(original:Node,first:string,last=first){
+  const editor=new Editor({element:null,injectCSS:false,extensions:[StarterKit.configure({orderedList:false,link:false,dropcursor:false,gapcursor:false,trailingNode:false}),ContinuousOrderedList],content:original.toJSON()});
+  editors.push(editor);editor.view.updateState(editor.state.reconfigure({plugins:editor.extensionManager.plugins}));
   let from=0,to=0;
-  original.descendants((node,pos)=>{if(node.type.name==='paragraph'){if(node.textContent===first)from=pos+1;if(node.textContent===last)to=pos+1+node.content.size;}});
+  editor.state.doc.descendants((node,pos)=>{if(node.type.name==='paragraph'){if(node.textContent===first)from=pos+1;if(node.textContent===last)to=pos+1+node.content.size;}});
   assert.ok(from&&to,'测试段落必须存在');
-  let state=EditorState.create({schema,doc:original,selection:TextSelection.create(original,from,to),plugins:[history(),continuationPlugin()]});
-  const source=listContext(state).list!;
-  const apply=(tr:Parameters<EditorState['apply']>[0])=>{state=state.applyTransaction(tr).state;};
-  assert.equal(liftListItem(schema.nodes.listItem)(state,tr=>{continueSplitSuffix(tr,source);apply(tr);}),true);
-  return {get state(){return state;},undo:()=>undo(state,apply),redo:()=>redo(state,apply)};
+  editor.commands.setTextSelection({from,to});return editor;
+}
+function lifted(original:Node,first:string,last=first){
+  const editor=commandEditor(original,first,last);
+  assert.equal(editor.commands.liftListItem('listItem'),true);
+  return {get state(){return editor.state;},undo:()=>editor.commands.undo(),redo:()=>editor.commands.redo()};
 }
 test('取消中间项只接续原列表拆出的后半组，保留自定义起点和已有独立列表',()=>{
   for(const start of [1,7]){
@@ -90,6 +96,23 @@ test('取消首尾项不改变独立起点；嵌套提级后不跨不同父级�
   const nested=doc([ol(30,false,[li('外层',[ol(7,false,[li('甲'),li('乙'),li('丙')])])])]);
   const result=lifted(nested,'乙'),inner:Node[]=[];result.state.doc.descendants(node=>{if(node.type.name==='orderedList'&&node.attrs.start===7)inner.push(node);});
   assert.equal(inner.length,2);assert.ok(inner.every(n=>n.attrs.continuePrevious===false));assert.equal(result.state.doc.textContent,nested.textContent);
+});
+
+test('直接提级与链式命令共用接续逻辑；能力检查和只读状态不修改正文',()=>{
+  const original=doc([ol(7,false,[li('甲'),li('乙'),li('丙')]),p('说明'),ol(10,true,[li('丁')])]);
+  const editor=commandEditor(original,'乙'),before=editor.getJSON();
+  assert.equal(editor.can().liftListItem('listItem'),true);assert.deepEqual(editor.getJSON(),before);
+  assert.equal(editor.chain().setTextSelection(editor.state.selection.from).liftListItem('listItem').run(),true);
+  assert.deepEqual(starts(editor.state.doc),[7,8,9]);assert.equal(editor.state.doc.textContent,original.textContent);
+  assert.equal(editor.commands.undo(),true);assert.deepEqual(editor.getJSON(),before);
+  editor.setEditable(false,false);assert.equal(editor.can().liftListItem('listItem'),false);assert.equal(editor.commands.liftListItem('listItem'),false);assert.deepEqual(editor.getJSON(),before);
+});
+
+test('空列表项回车使用的提级命令也保留后半组接续关系',()=>{
+  const original=doc([ol(7,false,[li('甲'),li(''),li('丙')]),p('说明'),ol(10,true,[li('丁')])]);
+  const editor=commandEditor(original,''),before=editor.getJSON();
+  assert.equal(editor.commands.liftEmptyBlock(),true);assert.deepEqual(starts(editor.state.doc),[7,8,9]);assert.equal(editor.state.doc.textContent,original.textContent);
+  assert.equal(editor.commands.undo(),true);assert.deepEqual(editor.getJSON(),before);
 });
 test('读取旧文档不自动改写存储；存档、完整备份和HTML导出保留接续后的数字',async()=>{
   await fs.mkdir(testRoot,{recursive:true});const root=await fs.mkdtemp(path.join(testRoot,'numbering-')),store=new Store(root),note=store.create().note;

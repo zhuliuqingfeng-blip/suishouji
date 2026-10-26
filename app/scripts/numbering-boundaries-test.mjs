@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 process.chdir(appRoot);
 const root=path.join(testRoot,'numbering-boundaries-'+Date.now());
 await fs.mkdir(root,{recursive:true});
-const p=text=>({type:'paragraph',content:[{type:'text',text}]}),item=(text,extra=[])=>({type:'listItem',content:[p(text),...extra]});
+const p=text=>({type:'paragraph',content:text?[{type:'text',text}]:[]}),item=(text,extra=[])=>({type:'listItem',content:[p(text),...extra]});
 const ol=(start,items,continuePrevious=false)=>({type:'orderedList',attrs:{start,continuePrevious},content:items.map(text=>typeof text==='string'?item(text):text)});
 const bullet=items=>({type:'bulletList',content:items.map(text=>item(text))});
 let app,page,id;
@@ -41,6 +41,40 @@ async function insertItemAfter(text,newText){
 }
 try{
   await launch();
+  await check('Shift+Tab取消中间项与按钮一致，撤销重做、保存重开后保持接续',async()=>{
+    await fixture('Shift+Tab中间项',[ol(1,['键盘甲','键盘乙','键盘丙']),p('说明'),ol(4,['键盘丁'],true),p('独立组'),ol(1,['独立甲']),p('说明'),ol(2,['独立乙'],true)]);
+    await cursor('键盘乙');await page.keyboard.press('Shift+Tab');assert.deepEqual(await lists(),[[1,1],[2,1],[3,1],[1,1],[2,1]]);
+    let doc=await saved();assert.deepEqual(doc.content.filter(n=>n.type==='orderedList').map(n=>n.attrs.continuePrevious),[false,true,true,false,true]);
+    await page.keyboard.press('Control+z');assert.deepEqual(await lists(),[[1,3],[4,1],[1,1],[2,1]]);
+    await page.keyboard.press('Control+y');assert.deepEqual(await lists(),[[1,1],[2,1],[3,1],[1,1],[2,1]]);
+    await saved();await close();await launch();await open('Shift+Tab中间项');assert.deepEqual(await lists(),[[1,1],[2,1],[3,1],[1,1],[2,1]]);
+  });
+  await check('按钮、Shift+Tab、Backspace和直接提级命令得到相同正文及编号关系',async()=>{
+    let expected;
+    for(const mode of ['按钮','Shift+Tab','Backspace','命令']){
+      await fixture('统一提级入口'+mode,[ol(7,['统一甲','统一乙','统一丙']),p('说明'),ol(10,['统一丁'],true)]);await cursor('统一乙');
+      if(mode==='按钮')await toggle();else if(mode==='命令')assert.equal(await page.evaluate(()=>document.querySelector('.tiptap').editor.commands.liftListItem('listItem')),true);else await page.keyboard.press(mode);
+      assert.deepEqual(await lists(),[[7,1],[8,1],[9,1]]);
+      const doc=await saved();if(expected)assert.deepEqual(doc,expected);else expected=doc;
+    }
+  });
+  await check('空编号项按Enter退出时也保持后续接续，撤销重做有效',async()=>{
+    await fixture('空编号项回车',[ol(7,['空项甲','','空项丙']),p('说明'),ol(10,['空项丁'],true)]);await cursor('');
+    await page.keyboard.press('Enter');assert.deepEqual(await lists(),[[7,1],[8,1],[9,1]]);
+    await page.keyboard.press('Control+z');assert.deepEqual(await lists(),[[7,3],[10,1]]);
+    await page.keyboard.press('Control+y');assert.deepEqual(await lists(),[[7,1],[8,1],[9,1]]);
+  });
+  await check('Shift+Tab支持多项及引用，首尾取消、项目列表与嵌套提级保持原行为',async()=>{
+    await fixture('键盘连续多项',[ol(7,['多项甲','多项乙','多项丙','多项丁','多项戊']),p('说明'),ol(12,['多项己'],true)]);
+    await page.evaluate(()=>{const element=document.querySelector('.tiptap'),editor=element.editor,paragraphs=[...element.querySelectorAll('p')],first=paragraphs.find(n=>n.textContent==='多项乙'),last=paragraphs.find(n=>n.textContent==='多项丙');editor.commands.setTextSelection({from:editor.view.posAtDOM(first,0),to:editor.view.posAtDOM(last,last.childNodes.length)});editor.view.focus();});
+    await page.keyboard.press('Shift+Tab');assert.deepEqual(await lists(),[[7,1],[8,2],[10,1]]);
+    await fixture('键盘引用提级',[{type:'blockquote',content:[ol(3,['键引甲','键引乙','键引丙']),p('说明'),ol(6,['键引丁'],true)]}]);
+    await cursor('键引乙');await page.keyboard.press('Shift+Tab');assert.deepEqual(await lists('.tiptap>blockquote>ol'),[[3,1],[4,1],[5,1]]);
+    for(const selected of ['首尾甲','首尾丙']){await fixture('键盘首尾取消'+selected,[ol(7,['首尾甲','首尾乙','首尾丙']),p('说明'),ol(10,['首尾丁'],true)]);await cursor(selected);await page.keyboard.press('Shift+Tab');assert.deepEqual(await lists(),[[7,2],[9,1]]);}
+    await fixture('键盘项目列表',[bullet(['项目甲','项目乙','项目丙'])]);await cursor('项目乙');await page.keyboard.press('Shift+Tab');assert.deepEqual(await lists(),[]);assert.deepEqual(await page.locator('.tiptap>ul').evaluateAll(nodes=>nodes.map(n=>n.children.length)),[1,1]);assert.equal(await page.locator('.tiptap>p').filter({hasText:/^项目乙$/}).count(),1);
+    await fixture('键盘嵌套提级',[ol(30,[item('键外层',[ol(7,['键内甲','键内乙','键内丙'])])])]);await cursor('键内乙');await page.keyboard.press('Shift+Tab');assert.deepEqual(await lists(),[[30,2]]);assert.deepEqual(await lists('.tiptap>ol>li>ol'),[[7,1],[7,1]]);
+    const doc=await saved();assert.ok(doc.content[0].content.every(n=>n.content.find(c=>c.type==='orderedList').attrs.continuePrevious===false));
+  });
   await check('外层编号不会使内层项目列表跳过接续；前组增删、撤销重做和重开有效',async()=>{
     await fixture('嵌套编号边界',[ol(30,[item('外层项目',[ol(7,['内层第七项']),p('内层说明'),bullet(['内层待编号甲','内层待编号乙'])])])]);
     await cursor('内层待编号甲');const pressedBefore=await page.getByRole('button',{name:'编号列表',exact:true}).getAttribute('aria-pressed');
