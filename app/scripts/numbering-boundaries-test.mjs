@@ -32,6 +32,7 @@ async function cursor(text){
 async function toggle(){await page.getByRole('button',{name:'编号列表',exact:true}).click();}
 async function lists(selector='.tiptap>ol'){return page.locator(selector).evaluateAll(nodes=>nodes.map(n=>[n.start,n.children.length]));}
 async function saved(){await page.keyboard.press('Control+s');await page.getByText('所有更改已保存',{exact:true}).waitFor();return page.evaluate(async id=>(await window.notes.get(id)).note.document,id);}
+async function documents(){return page.evaluate(async()=>{const rows=await window.notes.list({}),docs=await Promise.all(rows.map(async row=>({id:row.id,document:(await window.notes.get(row.id)).note.document})));return docs.sort((a,b)=>a.id.localeCompare(b.id));});}
 async function check(name,run){try{await run();checks.push(name);}catch(error){failures.push({name,error:error.stack});await page.screenshot({path:path.join(root,'failure-'+failures.length+'.png')});}}
 async function insertItemAfter(text,newText){
   await cursor(text);await page.keyboard.press('End');
@@ -41,6 +42,36 @@ async function insertItemAfter(text,newText){
 }
 try{
   await launch();
+  await check('列表项内引用按本级接续并随前组更新，撤销重做和重开有效',async()=>{
+    const selector='.tiptap>ol>li>blockquote>ol';
+    await fixture('列表内引用接续',[ol(30,[item('外层编号',[{type:'blockquote',content:[ol(7,['引用里的七']),p('引用里的说明'),p('引用里的八')]}])])]);
+    await cursor('引用里的八');const pressed=await page.getByRole('button',{name:'编号列表',exact:true}).getAttribute('aria-pressed');await toggle();
+    assert.deepEqual(await lists(selector),[[7,1],[8,1]]);assert.equal(pressed,'false');assert.deepEqual(await lists(),[[30,1]]);
+    await insertItemAfter('引用里的七','引用里新增的一项');assert.deepEqual(await lists(selector),[[7,2],[9,1]]);
+    await page.keyboard.press('Control+z');assert.deepEqual(await lists(selector),[[7,1],[8,1]]);await page.keyboard.press('Control+y');assert.deepEqual(await lists(selector),[[7,2],[9,1]]);
+    const doc=await saved();assert.equal(doc.content[0].content[0].content[1].content[2].attrs.continuePrevious,true);
+    await close();await launch();await open('列表内引用接续');assert.deepEqual(await lists(selector),[[7,2],[9,1]]);assert.deepEqual(await lists(),[[30,1]]);
+  });
+  await check('多层引用和项目列表内的引用支持多段编号，不借用其他引用的前组',async()=>{
+    const quote=content=>({type:'blockquote',content}),scope=()=>quote([ol(7,['本级七']),p('本级说明'),p('本级八'),p('本级九')]);
+    for(const [title,content,selector] of [
+      ['双重引用',[ol(30,[item('外层',[quote([scope()])])])],'.tiptap>ol>li>blockquote>blockquote>ol'],
+      ['项目列表里的引用',[{type:'bulletList',content:[item('外项目',[scope()])]}],'.tiptap>ul>li>blockquote>ol']
+    ]){
+      await fixture(title,content);
+      await page.evaluate(()=>{const element=document.querySelector('.tiptap'),editor=element.editor,paragraphs=[...element.querySelectorAll('p')],first=paragraphs.find(n=>n.textContent==='本级八'),last=paragraphs.find(n=>n.textContent==='本级九');editor.commands.setTextSelection({from:editor.view.posAtDOM(first,0),to:editor.view.posAtDOM(last,last.childNodes.length)});editor.view.focus();});
+      assert.equal(await page.getByRole('button',{name:'编号列表',exact:true}).getAttribute('aria-pressed'),'false');await page.keyboard.press('Control+Shift+7');assert.deepEqual(await lists(selector),[[7,1],[8,2]]);await saved();
+    }
+    await fixture('引用之间的独立编号',[ol(20,['其他作用域']),p('说明'),ol(30,[item('外层',[quote([ol(7,['另一引用的七'])]),quote([p('本引用没有前组')])])])]);
+    await cursor('本引用没有前组');await toggle();assert.deepEqual(await lists('.tiptap>ol>li>blockquote:last-of-type>ol'),[[1,1]]);
+    const doc=await saved();assert.equal(doc.content[2].content[0].content[2].content[0].attrs.continuePrevious,false);assert.deepEqual(await lists(),[[20,1],[30,1]]);
+  });
+  await check('引用内Shift+Tab仍按实际提级目标修正外层拆分，正文和引用保留',async()=>{
+    await fixture('引用里的外层提级',[ol(1,['外甲',item('外乙',[{type:'blockquote',content:[p('提级引用里的光标')]}]),'外丙']),p('说明'),ol(4,['外丁'],true)]);
+    await cursor('提级引用里的光标');assert.equal(await page.getByRole('button',{name:'编号列表',exact:true}).getAttribute('aria-pressed'),'false');
+    await page.keyboard.press('Shift+Tab');assert.deepEqual(await lists(),[[1,1],[2,1],[3,1]]);assert.equal(await page.locator('.tiptap>blockquote').filter({hasText:'提级引用里的光标'}).count(),1);
+    await page.keyboard.press('Control+z');assert.deepEqual(await lists(),[[1,3],[4,1]]);await page.keyboard.press('Control+y');assert.deepEqual(await lists(),[[1,1],[2,1],[3,1]]);await saved();
+  });
   await check('Shift+Tab取消中间项与按钮一致，撤销重做、保存重开后保持接续',async()=>{
     await fixture('Shift+Tab中间项',[ol(1,['键盘甲','键盘乙','键盘丙']),p('说明'),ol(4,['键盘丁'],true),p('独立组'),ol(1,['独立甲']),p('说明'),ol(2,['独立乙'],true)]);
     await cursor('键盘乙');await page.keyboard.press('Shift+Tab');assert.deepEqual(await lists(),[[1,1],[2,1],[3,1],[1,1],[2,1]]);
@@ -106,9 +137,10 @@ try{
   await check('修复后的编号关系完整备份恢复和HTML导出保持一致',async()=>{
     await saved();const backup=path.join(root,'编号备份.zip'),out=path.join(root,'编号导出');await fs.mkdir(out);
     await app.evaluate(({dialog,shell},{backup,out})=>{dialog.showSaveDialog=async()=>({canceled:false,filePath:backup});dialog.showOpenDialog=async(_win,options)=>({canceled:false,filePaths:options.properties?.includes('openDirectory')?[out]:[backup]});dialog.showMessageBox=async()=>({response:1});shell.openPath=async()=>'';},{backup,out});
-    assert.ok(await page.evaluate(()=>window.notes.backup()));const original=await page.evaluate(async id=>(await window.notes.get(id)).note,id);
-    await page.evaluate(async id=>{const {note}=await window.notes.get(id);await window.notes.save({...note,document:{type:'doc',content:[{type:'paragraph'}]}});},id);
-    assert.ok(await page.evaluate(()=>window.notes.restoreBackup()));assert.deepEqual(await page.evaluate(async id=>(await window.notes.get(id)).note.document,id),original.document);
+    assert.ok(await page.evaluate(()=>window.notes.backup()));const original=await documents();
+    await page.evaluate(async rows=>{for(const {id} of rows){const {note}=await window.notes.get(id);await window.notes.save({...note,document:{type:'doc',content:[{type:'paragraph'}]}});}},original);
+    assert.ok(await page.evaluate(()=>window.notes.restoreBackup()));
+    assert.deepEqual(await documents(),original);
     const destination=await page.evaluate(id=>window.notes.exportNotes(id),id),html=await fs.readFile(path.join(destination,id+'.html'),'utf8');
     for(const start of [5,7,8,9])assert.ok(html.includes(`<ol start="${start}">`));
   });

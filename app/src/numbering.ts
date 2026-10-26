@@ -1,6 +1,6 @@
 import OrderedList from '@tiptap/extension-ordered-list';
-import {commands as baseCommands,type Command} from '@tiptap/core';
-import type {Node as ProseMirrorNode} from '@tiptap/pm/model';
+import {commands as baseCommands,getNodeType,type Command} from '@tiptap/core';
+import type {Node as ProseMirrorNode,NodeType} from '@tiptap/pm/model';
 import {Plugin,PluginKey,TextSelection,type EditorState,type Transaction} from '@tiptap/pm/state';
 import {closeHistory} from '@tiptap/pm/history';
 import {canJoin} from '@tiptap/pm/transform';
@@ -8,17 +8,19 @@ import {canJoin} from '@tiptap/pm/transform';
 type NumberingState=Pick<EditorState,'doc'|'selection'>;
 export const listStart=(node:ProseMirrorNode):number=>Number.isSafeInteger(node.attrs.start)&&node.attrs.start>=1?node.attrs.start:1;
 const numeric=(node:ProseMirrorNode)=>node.type.name==='orderedList'&&(!node.attrs.type||node.attrs.type==='1');
+const listNode=(node:ProseMirrorNode)=>node.type.name==='orderedList'||node.type.name==='bulletList';
 export function listContext(state:NumberingState){
-  const {$from}=state.selection;
-  for(let depth=$from.depth;depth>0;depth--){
-    const node=$from.node(depth);
-    if(node.type.name==='orderedList'||node.type.name==='bulletList')return {parent:$from.node(depth-1),parentStart:depth===1?0:$from.start(depth-1),index:$from.index(depth-1),list:{node,pos:$from.before(depth)}};
-  }
-  if($from.depth===0&&state.doc.childCount===1){
+  const {$from,$to,from,to}=state.selection,range=$from.blockRange($to);
+  if(from===0&&to===state.doc.content.size&&state.doc.childCount===1){
     const node=state.doc.firstChild!;
-    if(node.type.name==='orderedList'||node.type.name==='bulletList')return {parent:state.doc,parentStart:0,index:0,list:{node,pos:0}};
+    if(listNode(node))return {parent:state.doc,parentStart:0,index:0,list:{node,pos:0}};
   }
-  const depth=Math.max(0,$from.depth-1);
+  const depth=range?.depth??Math.max(0,$from.depth-1),parent=$from.node(depth);
+  // A selection inside a list item or spanning its sibling items operates on
+  // that list. Other block containers (e.g. quotes) are wrapping scopes of their
+  // own; an enclosing list beyond that range must not count as the active list.
+  const listDepth=listNode(parent)?depth:depth>0&&listNode($from.node(depth-1))?depth-1:0;
+  if(listDepth>0)return {parent:$from.node(listDepth-1),parentStart:listDepth===1?0:$from.start(listDepth-1),index:$from.index(listDepth-1),list:{node:$from.node(listDepth),pos:$from.before(listDepth)}};
   return {parent:$from.node(depth),parentStart:depth===0?0:$from.start(depth),index:$from.index(depth),list:null};
 }
 export function previousNumberedList(state:NumberingState){
@@ -64,9 +66,14 @@ function continueSplitSuffix(tr:Transaction,source:{node:ProseMirrorNode;pos:num
   if(!first?.list||!last?.list||first.parent!==last.parent||first.index>=last.index||!numeric(first.list.node)||!numeric(last.list.node))return;
   tr.setNodeMarkup(last.list.pos,undefined,{...last.list.node.attrs,continuePrevious:true});
 }
-function numberedLift(command:Command):Command{return props=>{
+function numberedLift(command:Command,itemType?:string|NodeType):Command{return props=>{
   if(!props.editor.isEditable)return false;
-  const source=listContext(props.state).list,stepStart=props.tr.steps.length;
+  // Lifting may deliberately cross a quote to its enclosing list item. Match
+  // the upstream lift range instead of reusing the paragraph-wrapping scope.
+  const type=itemType?getNodeType(itemType,props.state.schema):null;
+  const {$from,$to}=props.state.selection,range=type?$from.blockRange($to,node=>node.firstChild?.type===type):null;
+  const source=type?(range&&range.depth>0&&listNode(range.parent)?{node:range.parent,pos:$from.before(range.depth)}:null):listContext(props.state).list;
+  const stepStart=props.tr.steps.length;
   const result=command(props);
   if(result&&props.dispatch&&source&&numeric(source.node)){
     closeHistory(props.tr);continueSplitSuffix(props.tr,source,stepStart);
@@ -106,17 +113,19 @@ export const ContinuousOrderedList=OrderedList.extend({
     return {...parent,
       // Share split repair across Shift+Tab, Backspace, toolbar, direct commands
       // and Enter exiting an empty item; preserve upstream behavior otherwise.
-      liftListItem:typeOrName=>numberedLift(baseCommands.liftListItem(typeOrName)),
+      liftListItem:typeOrName=>numberedLift(baseCommands.liftListItem(typeOrName),typeOrName),
       liftEmptyBlock:()=>numberedLift(baseCommands.liftEmptyBlock()),
       toggleOrderedList:()=>props=>{
         if(!props.editor.isEditable)return false;
         const current=listContext(props.state).list,wasActive=current?.node.type.name===this.name,previous=previousNumberedList(props.state);
         if(props.dispatch)closeHistory(props.tr);
-        if(wasActive)return parent?.toggleOrderedList?.()(props)??false;
+        if(wasActive){
+          const wholeDocList=props.state.selection.from===0&&props.state.selection.to===props.state.doc.content.size&&props.state.doc.childCount===1;
+          return wholeDocList?(parent?.toggleOrderedList?.()(props)??false):props.commands.liftListItem(this.options.itemTypeName);
+        }
         const attributes={start:previous?listStart(previous.node)+previous.node.childCount:1,continuePrevious:!!previous};
-        const type=props.state.schema.nodes[this.name],range=props.state.selection.$from.blockRange(props.state.selection.$to);
-        const wholeDocList=props.state.doc.childCount===1&&props.state.selection.from===0&&props.state.selection.to===props.state.doc.content.size;
-        if(current?.node.type.name==='bulletList'&&type.validContent(current.node.content)&&(wholeDocList||range&&range.depth>=1&&range.depth-props.tr.doc.resolve(current.pos).depth-1<=1)){
+        const type=props.state.schema.nodes[this.name];
+        if(current?.node.type.name==='bulletList'&&type.validContent(current.node.content)){
           if(props.dispatch){props.tr.setNodeMarkup(current.pos,type,attributes);joinPreviousGroup(props.tr);}
           return true;
         }

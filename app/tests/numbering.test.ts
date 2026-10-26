@@ -7,7 +7,7 @@ import {EditorState,TextSelection} from '@tiptap/pm/state';
 import {history,undo,redo} from '@tiptap/pm/history';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {ContinuousOrderedList,continuationPlugin,numberingChanges,previousNumberedList} from '../src/numbering.js';
+import {ContinuousOrderedList,continuationPlugin,numberingChanges,previousNumberedList,listContext} from '../src/numbering.js';
 import {Store} from '../electron/store.js';
 import {createBackup,validateBackup,applyRestore,exportHtml} from '../electron/archive.js';
 import {testRoot} from '../scripts/paths.mjs';
@@ -71,6 +71,51 @@ function lifted(original:Node,first:string,last=first){
   assert.equal(editor.commands.liftListItem('listItem'),true);
   return {get state(){return editor.state;},undo:()=>editor.commands.undo(),redo:()=>editor.commands.redo()};
 }
+
+test('列表项里的引用按实际包装父级接续，普通与多层容器都不借用外层编号',()=>{
+  const quote=(content:Node[])=>schema.nodes.blockquote.create(null,content);
+  const frames=[
+    (scope:Node)=>doc([scope]),
+    (scope:Node)=>doc([ol(30,false,[li('外层',[scope])])]),
+    (scope:Node)=>doc([schema.nodes.bulletList.create(null,[li('外层',[scope])])]),
+    (scope:Node)=>doc([ol(30,false,[li('外层',[quote([scope])])])]),
+    (scope:Node)=>doc([quote([ol(30,false,[li('外层',[scope])])])]),
+    (scope:Node)=>doc([ol(30,false,[li('外层',[ol(40,false,[li('第二层',[scope])])])])])
+  ];
+  for(const frame of frames){
+    const original=frame(quote([ol(7,false,[li('引用七')]),p('说明'),p('待编号甲'),p('待编号乙')]));
+    const editor=commandEditor(original,'待编号甲','待编号乙'),before=editor.getJSON(),context=listContext(editor.state);
+    assert.equal(!!context.list,false);assert.equal(context.parent.type.name,'blockquote');assert.equal(previousNumberedList(editor.state)!.node.attrs.start,7);
+    assert.equal(editor.can().toggleOrderedList(),true);assert.deepEqual(editor.getJSON(),before);
+    assert.equal(editor.commands.toggleOrderedList(),true);assert.deepEqual(starts(editor.state.doc),[...starts(original),8]);assert.equal(editor.state.doc.textContent,original.textContent);
+    const current=listContext(editor.state).list!;assert.equal(current.node.attrs.continuePrevious,true);assert.equal(current.node.childCount,2);
+    assert.equal(editor.commands.restartNumbering(),true);assert.equal(listContext(editor.state).list!.node.attrs.start,1);
+    assert.equal(editor.commands.continueNumbering(),true);assert.equal(listContext(editor.state).list!.node.attrs.start,8);
+    assert.equal(editor.commands.undo(),true);assert.equal(listContext(editor.state).list!.node.attrs.start,1);
+    assert.equal(editor.commands.undo(),true);assert.equal(listContext(editor.state).list!.node.attrs.start,8);
+    assert.equal(editor.commands.undo(),true);assert.deepEqual(editor.getJSON(),before);
+    assert.equal(editor.commands.redo(),true);assert.deepEqual(starts(editor.state.doc),[...starts(original),8]);
+    const empty=frame(quote([p('没有本级前组')])),fresh=commandEditor(empty,'没有本级前组');
+    assert.equal(!!previousNumberedList(fresh.state),false);assert.equal(fresh.commands.toggleOrderedList(),true);assert.deepEqual(starts(fresh.state.doc),[...starts(empty),1]);assert.equal(listContext(fresh.state).list!.node.attrs.continuePrevious,false);
+  }
+});
+
+test('全选与多项选区保留列表操作；跨出内层列表时按实际选区判断',()=>{
+  const sole=doc([ol(7,false,[li('甲'),li('乙'),li('丙')])]),editor=commandEditor(sole,'甲');
+  editor.commands.selectAll();assert.equal(listContext(editor.state).list!.node.type.name,'orderedList');assert.equal(editor.commands.toggleOrderedList(),true);assert.deepEqual(starts(editor.state.doc),[]);assert.equal(editor.state.doc.textContent,sole.textContent);
+  const nested=doc([ol(30,false,[li('外甲',[schema.nodes.bulletList.create(null,[li('内项目')]),p('同一外层项的正文')]),li('外乙')])]);
+  const span=commandEditor(nested,'内项目','同一外层项的正文');assert.equal(listContext(span.state).list!.node.attrs.start,30);
+  assert.equal(span.commands.toggleOrderedList(),true);assert.deepEqual(starts(span.state.doc),[30]);assert.equal(span.state.doc.lastChild!.type.name,'orderedList');assert.equal(span.state.doc.textContent,nested.textContent);
+  const quoted=doc([ol(30,false,[li('外层',[schema.nodes.blockquote.create(null,[ol(7,false,[li('引用七')]),p('待编号')])])])]);
+  const crossed=commandEditor(quoted,'引用七','待编号'),context=listContext(crossed.state);
+  assert.equal(!!context.list,false);assert.equal(context.parent.type.name,'blockquote');assert.equal(!!previousNumberedList(crossed.state),false);
+});
+
+test('在列表项引用内直接提级时，补偿按实际提级目标计算',()=>{
+  const original=doc([ol(1,false,[li('外甲'),li('外乙',[schema.nodes.blockquote.create(null,p('引用里的光标'))]),li('外丙')]),p('说明'),ol(4,true,[li('外丁')])]);
+  const result=lifted(original,'引用里的光标');assert.deepEqual(starts(result.state.doc),[1,2,3]);assert.equal(result.state.doc.textContent,original.textContent);
+  assert.equal(result.undo(),true);assert.deepEqual(result.state.doc.toJSON(),original.toJSON());
+});
 test('取消中间项只接续原列表拆出的后半组，保留自定义起点和已有独立列表',()=>{
   for(const start of [1,7]){
     const original=doc([ol(start,false,[li('甲'),li('乙'),li('丙')]),p('说明'),ol(start+3,true,[li('丁')]),p('另一组'),ol(1,false,[li('独立一')]),p('说明'),ol(2,true,[li('独立二')])]);
