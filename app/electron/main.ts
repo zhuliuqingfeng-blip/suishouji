@@ -97,7 +97,7 @@ const methods: Record<string, (...args: any[]) => unknown> = {
     await exclusive(() => exportHtml(store, destination, id)); await shell.openPath(destination); return destination;
   },
   info: () => ({ dataDir, version: app.getVersion(), lastBackup, backupWarning }),
-  openDataDir: async () => { await shell.openPath(dataDir); },
+  openDataDir: async () => { const error = await shell.openPath(dataDir); if (error) throw new Error('无法打开数据文件夹：' + error); },
   readClipboardText: () => clipboard.readText(),
   writeClipboardText: (text: string) => {
     if (typeof text !== 'string') throw new Error('复制内容必须是文字');
