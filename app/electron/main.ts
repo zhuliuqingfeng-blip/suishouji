@@ -7,12 +7,18 @@ import { Store } from './store.js';
 import { createBackup, validateBackup, applyRestore, recoverInterruptedRestore, exportHtml } from './archive.js';
 import type { Filter, NoteInput, TextMenuAction, TextMenuOptions, ImportantDayInput } from './shared.js';
 import { fitWindow,readWindowState,writeWindowState } from './window-state.js';
+import {storageLocation} from './storage-location.js';
+import {emptyData,legacyRoot,recoverLegacyImport,pendingLegacyImport,requestLegacyImport,importLegacyData,clearLegacyRequest} from './legacy-import.js';
+import {ensureLegacyClosed} from './windows-process.js';
+import {backupBeforeVersion,rememberVersion} from './version-backup.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const testMode = process.env.NOTES_TEST_MODE === '1';
-const dataDir = (testMode && process.env.NOTES_DATA_DIR) || (app.isPackaged ? path.join(path.dirname(app.getPath('exe')), '我的数据') : path.resolve('.local-data'));
+const metadata=JSON.parse(fs.readFileSync(path.join(here,'../package.json'),'utf8')) as {distribution?:string};
+const {dataDir,distribution}=storageLocation({packaged:app.isPackaged,distribution:metadata.distribution,exe:app.getPath('exe'),localAppData:process.env.LOCALAPPDATA||path.join(app.getPath('home'),'AppData','Local'),developmentRoot:process.cwd(),testMode,testData:process.env.NOTES_DATA_DIR});
 fs.mkdirSync(dataDir, { recursive: true });
 app.setPath('userData', path.join(dataDir, '.运行缓存'));
+if(process.platform==='win32')app.setAppUserModelId(distribution==='installed'?'local.suishouji.desktop':'local.suishouji.desktop.portable');
 protocol.registerSchemesAsPrivileged([{ scheme: 'app-asset', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }]);
 let win: BrowserWindow | null = null, store: Store, busy = false, mayClose = false, backupWarning: string | null = null, lastBackup: string | null = null;
 const lock = app.requestSingleInstanceLock(); if (!lock) app.quit();
@@ -96,7 +102,19 @@ const methods: Record<string, (...args: any[]) => unknown> = {
     const destination = path.join(picked.filePaths[0], `随手记导出-${fileStamp()}`);
     await exclusive(() => exportHtml(store, destination, id)); await shell.openPath(destination); return destination;
   },
-  info: () => ({ dataDir, version: app.getVersion(), lastBackup, backupWarning }),
+  info: () => ({ dataDir, version: app.getVersion(), lastBackup, backupWarning, distribution, needsSetup:distribution==='installed'&&!fs.existsSync(path.join(dataDir,'.安装引导完成'))&&emptyData(dataDir) }),
+  finishInstallSetup: () => { fs.writeFileSync(path.join(dataDir,'.安装引导完成'),'1'); },
+  importLegacy: async () => {
+    if(distribution!=='installed')throw new Error('请在安装版中使用这个入口');
+    if(!emptyData(dataDir))throw new Error('当前已有手记或重要日子。为避免覆盖，请使用“从备份恢复”来替换资料');
+    const picked=await dialog.showOpenDialog(win!,{title:'选择旧版软件文件夹或“我的数据”',properties:['openDirectory']});
+    if(picked.canceled)return false;
+    const source=legacyRoot(picked.filePaths[0],dataDir);await ensureLegacyClosed(source.root);
+    const answer=await dialog.showMessageBox(win!,{type:'question',title:'从免安装版继续使用',message:`导入 ${source.notes} 条手记、${source.days} 个重要日子？`,detail:`回收站中的 ${source.trash} 条手记、图片附件、已有备份和布局设置也会保留。\n\n${source.root}\n\n会先建立并校验备份，再重新打开安装版。旧版数据不会删除；两种版本今后的修改各自独立。`,buttons:['取消','备份并导入'],defaultId:1,cancelId:0});
+    if(answer.response!==1)return false;
+    requestLegacyImport(dataDir,source.root);
+    setTimeout(()=>{mayClose=true;app.relaunch();app.quit();},200);return true;
+  },
   openDataDir: async () => { const error = await shell.openPath(dataDir); if (error) throw new Error('无法打开数据文件夹：' + error); },
   readClipboardText: () => clipboard.readText(),
   writeClipboardText: (text: string) => {
@@ -129,7 +147,18 @@ const methods: Record<string, (...args: any[]) => unknown> = {
 };
 
 async function start() {
-  recoverInterruptedRestore(dataDir); store = new Store(dataDir);
+  if(distribution==='installed'){
+    recoverLegacyImport(dataDir);
+    const source=pendingLegacyImport(dataDir);
+    if(source){
+      try{await importLegacyData(dataDir,source,{ensureClosed:ensureLegacyClosed});fs.writeFileSync(path.join(dataDir,'.安装引导完成'),'1');}
+      catch(error){clearLegacyRequest(dataDir);await dialog.showMessageBox({type:'error',title:'旧版导入未完成',message:error instanceof Error?error.message:String(error),detail:'旧版原件和现有安装版资料已保留。可以在“数据与设置”中重新导入。',buttons:['知道了']});}
+    }
+  }
+  recoverInterruptedRestore(dataDir);
+  if(distribution==='installed')await backupBeforeVersion(dataDir,app.getVersion());
+  store = new Store(dataDir);
+  if(distribution==='installed')rememberVersion(dataDir,app.getVersion());
   try { if (!testMode) await dailyBackup(); } catch (error) { backupWarning = `自动备份未完成：${error instanceof Error ? error.message : error}`; }
   protocol.handle('app-asset', request => {
     try { const url = new URL(request.url); if (url.hostname !== 'media') return new Response('', { status: 403 });
@@ -147,7 +176,7 @@ async function start() {
   const preferences=path.join(app.getPath('userData'),'window-state.json');
   const state=fitWindow(readWindowState(preferences),screen.getAllDisplays().map(d=>d.workArea));
   const area=screen.getDisplayMatching(state).workArea;
-  win = new BrowserWindow({ ...state, minWidth: Math.min(920,area.width), minHeight: Math.min(650,area.height), title: '随手记', backgroundColor: '#fffefa', autoHideMenuBar: true, show: false,
+  win = new BrowserWindow({ ...state, minWidth: Math.min(920,area.width), minHeight: Math.min(650,area.height), title: distribution==='portable'?'随手记 · 免安装版':'随手记', backgroundColor: '#fffefa', autoHideMenuBar: true, show: false,
     icon: path.join(here, '../assets/icon.ico'),
     webPreferences: { preload: path.join(here, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false } });
   win.setMenu(null);

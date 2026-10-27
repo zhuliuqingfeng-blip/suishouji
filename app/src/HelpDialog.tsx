@@ -65,7 +65,7 @@ export function HelpDialog({info, onClose, onOpenDataDir}: {
         <details name="usage-help-topic"><summary>数据与备份<ChevronDown size={16}/></summary>
           <div className="usage-help-answer">
             <p>文字、图片和重要日子，都在这台电脑里。每天首次打开会自动备份，保留最近七份；也可以在“数据与设置”中点“备份全部数据”，另存一份到 U 盘。</p>
-            <p>换电脑前先关闭软件，再复制<strong>整个软件文件夹</strong>，包括里面的“我的数据”。也可以在另一台电脑上从完整备份恢复。</p>
+            {info?.distribution==='installed'?<><p>以后更新，直接运行新版安装包即可，无需卸载或搬动资料。卸载只移除程序，重新安装仍能读取原有资料。</p><p>换电脑时，在新电脑安装随手记，再从完整备份恢复。资料独立于程序保存，只复制程序文件夹不能带走记录。</p></>:<p>换电脑前先关闭软件，再复制<strong>整个软件文件夹</strong>，包括里面的“我的数据”。也可以在另一台电脑上从完整备份恢复。</p>}
             <p>想用浏览器查看手记？在记录的“更多记录操作”中导出，打开导出文件夹里的“打开我的记录.html”即可。</p>
             <div className="usage-help-location"><span>你的数据位置</span><code>{info?.dataDir || '正在读取…'}</code><button disabled={opening || !info?.dataDir} onClick={() => void openFolder()}><FolderOpen size={15}/>{opening ? '正在打开…' : '打开数据文件夹'}</button>{error && <p role="alert">{error}</p>}</div>
           </div>

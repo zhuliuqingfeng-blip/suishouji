@@ -54,3 +54,9 @@
   .usage-help-body { padding:0 22px 14px }
   .usage-help-footer { padding:14px 22px }
 }
+.install-welcome { width:min(540px,calc(100vw - 40px)) }
+.install-welcome .usage-help-body>p { font-size:13px; line-height:1.9; margin:0 0 16px }
+.install-welcome .install-welcome-note { color:var(--muted); font-size:12px }
+.install-welcome .install-welcome-error { color:var(--danger) }
+.install-welcome .usage-help-footer { justify-content:flex-end }
+.install-welcome .usage-help-footer>.install-welcome-secondary { background:none; color:var(--muted); padding-inline:12px }

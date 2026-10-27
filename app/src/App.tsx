@@ -17,6 +17,7 @@ import {dayDistance,occurrence} from '../electron/important-days';
 import {ContinuousOrderedList} from './numbering';
 import {NumberingControl} from './NumberingControl';
 import {HelpDialog} from './HelpDialog';
+import {InstallWelcome} from './InstallWelcome';
 
 const LocalImage = Image.extend({
   addAttributes() { return { ...this.parent?.(), assetId: { default: null }, width: { default: 560, renderHTML: attrs => ({ width: attrs.width, style: `max-width:100%;width:${attrs.width}px;height:auto` }) } }; }
@@ -354,10 +355,11 @@ export default function App() {
         {(inLibrary||inDocument)&&<button className="new-button" aria-label="新建记录" title="新建记录 Ctrl+N" disabled={blocked} onClick={()=>void newNote()}><Plus size={17}/><span>新建记录</span><kbd>Ctrl N</kbd></button>}
         <div className="settings-anchor"><IconButton title="数据与设置" disabled={blocked} onClick={()=>setMenu(!menu)}><Settings2 size={19}/></IconButton>
           {menu&&<div className="dropdown settings-menu" onClick={e=>e.stopPropagation()}>
-            <div className="menu-heading">本地资料管理</div>
+            <div className="menu-heading">{info?.distribution==='installed'?'安装版 · 资料独立保存':info?.distribution==='portable'?'免安装版 · 资料随文件夹携带':'本地资料管理'}</div>
             <div className="settings-summary" aria-label="资料近况"><span><b data-testid="settings-total">{overview.active}</b> 条手记 · 近7天更新 <b data-testid="home-week">{homeSnapshot(homeNotes,lastOpened,new Date()).updatedThisWeek}</b> 条</span><span className="settings-backup-state">{info?.lastBackup?`最近备份：${fullDate(info.lastBackup)}`:'暂无备份'}</span>{info?.backupWarning&&<p className="danger">{info.backupWarning}</p>}</div>
             <button onClick={()=>void act(()=>api.backup(),'备份已保存，可将备份复制到U盘')}><Download/>备份全部数据</button>
             <button onClick={()=>void act(async()=>{const restored=await api.restoreBackup();if(restored){setUndo(null);clearSelection();await days.refresh();}return restored;},'备份已恢复',true)}><ArchiveRestore/>从备份恢复</button>
+            {info?.distribution==='installed'&&<button onClick={()=>void act(()=>api.importLegacy())}><FolderOpen/>从免安装版导入</button>}
             <button onClick={()=>void act(()=>api.exportNotes(),'已导出为可直接查看的网页')}><Upload/>导出全部记录</button><div className="menu-line"/>
             <button onClick={()=>{setMenu(false);void changeView(true,'',true);}}><Trash2/>查看回收站{overview.trash>0?`（${overview.trash} 条）`:''}</button>
             <button onClick={()=>void api.openDataDir().catch(report)}><FolderOpen/>打开数据文件夹</button>
@@ -445,5 +447,6 @@ export default function App() {
     {zoom && <div className="image-modal" role="dialog" aria-label="查看图片" onClick={() => setZoom(null)}><button aria-label="关闭图片"><X size={24}/></button><img src={zoom} alt="记录中的图片"/><span>点击任意位置或按 Esc 关闭</span></div>}
     {linkValue !== null && <div className="modal-backdrop" onClick={() => setLinkValue(null)}><div className="help-dialog" role="dialog" aria-label="插入网页链接" onClick={e => e.stopPropagation()}><button className="modal-close" aria-label="关闭链接设置" onClick={() => setLinkValue(null)}><X size={19}/></button><h2>添加一个网页链接</h2><p>输入 http:// 或 https:// 开头的网址。留空可以移除当前链接。</p><form className="link-form" onSubmit={e => { e.preventDefault(); const href = linkValue.trim(); if (!href) editor?.chain().focus().extendMarkRange('link').unsetLink().run(); else if (/^https?:\/\//i.test(href)) editor?.chain().focus().extendMarkRange('link').setLink({href}).run(); else { notify('请输入 http:// 或 https:// 开头的网页地址', true); return; } setLinkValue(null); }}><input aria-label="网页地址" autoFocus value={linkValue} onChange={e => setLinkValue(e.target.value)}/><button type="submit">确定</button></form></div></div>}
     {help && <HelpDialog info={info} onClose={()=>setHelp(false)} onOpenDataDir={()=>api.openDataDir()}/>}
+    {info?.needsSetup&&<InstallWelcome api={api} onReady={()=>setInfo({...info,needsSetup:false})}/>}
   </div>;
 }

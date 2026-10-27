@@ -4,9 +4,9 @@
 
 一款安静、易用的 Windows 本地记录软件。把突然冒出的想法、截图和文件收在一起，也替你记着家人的生日和纪念日。
 
-**[下载 Windows 免安装版](https://github.com/zhuliuqingfeng-blip/suishouji/releases/latest)** · [使用说明](docs/使用说明.txt) · [反馈问题](https://github.com/zhuliuqingfeng-blip/suishouji/issues)
+**[下载 Windows 版](https://github.com/zhuliuqingfeng-blip/suishouji/releases/latest)** · [使用说明](docs/使用说明.txt) · [反馈问题](https://github.com/zhuliuqingfeng-blip/suishouji/issues)
 
-Windows 64 位 · 免安装 · 离线可用 · 数据保存在本地
+Windows 64 位 · 安装版 / 免安装版 · 离线可用 · 数据保存在本地
 
 ![随手记首页：写点什么、继续上次与最近记录](docs/images/readme-home.png)
 
@@ -39,17 +39,20 @@ Windows 64 位 · 免安装 · 离线可用 · 数据保存在本地
 
 ## 资料保存在自己的电脑里
 
-无需注册账号，断网也能记录。手记、图片和附件统一保存在软件旁的“我的数据”文件夹中。
+无需注册账号，断网也能记录。安装版将资料独立保存在当前用户的应用数据目录，更新时运行新版安装包即可继续使用，正常卸载也会保留资料。免安装版则把资料放在软件旁的“我的数据”里，方便随文件夹携带。
 
-每天首次启动自动备份，保留最近七份；也可以一键备份全部资料，或将手记导出为 HTML，用浏览器阅读。换电脑时，正常关闭软件后复制整个软件文件夹，或使用备份恢复，就能把记录一起带走。
+每天首次启动自动备份，保留最近七份；也可以一键备份全部资料，或将手记导出为 HTML，用浏览器阅读。换电脑时，在新电脑安装软件并恢复完整备份，就能把记录一起带走。
 
 ## 开始使用
 
-1. 打开 **[最新版下载页](https://github.com/zhuliuqingfeng-blip/suishouji/releases/latest)**，在 **Assets** 下载 `suishouji-版本号-windows-x64.zip`。
-2. 完整解压到可写入的文件夹，双击其中的 `随手记.exe`。无需安装 Node.js 或数据库。
-3. 点击“写点什么”，记下第一件想留下的事。
+1. 打开 **[最新版下载页](https://github.com/zhuliuqingfeng-blip/suishouji/releases/latest)**，在 **Assets** 选择文件。
+2. **推荐安装版**：运行 `suishouji-版本号-setup-x64.exe`，按提示安装。以后的更新也直接运行新版安装包。
+3. **免安装版**：下载 Windows x64 的 `.zip`，完整解压后双击 `随手记.exe`。需要随文件夹携带资料时可选这一版。
+4. 点击“写点什么”，记下第一件想留下的事。无需配置 Node.js 或数据库。
 
-运行软件请选择上面的 Windows 压缩包；GitHub 自动生成的 **Source code** 是源码。升级或恢复资料前，请先备份。更多操作见 [使用说明](docs/使用说明.txt)。
+已经在用免安装版？首次打开安装版时选择“从免安装版导入”，关闭旧版后选中原软件文件夹即可，旧资料会保留。[迁移与使用说明](docs/使用说明.txt)。
+
+安装版从 1.8.0 开始提供；更早版本的下载页只有免安装包。GitHub 自动生成的 **Source code** 是源码，不是可运行的软件。
 
 <details>
 <summary>更多文档与项目说明</summary>

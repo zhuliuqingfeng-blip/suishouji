@@ -11,7 +11,7 @@ export type SortOrder = 'updated' | 'created' | 'title';
 export interface Filter { query?: string; tag?: string; trash?: boolean; sort?: SortOrder }
 export interface BatchResult { succeeded: string[]; failed: { id: string; error: string }[]; cancelled?: boolean; warnings?: string[]; undo?: { token: string; expiresAt: number } }
 export interface Overview { active: number; trash: number; tags: { name: string; count: number }[] }
-export interface AppInfo { dataDir: string; version: string; lastBackup: string | null; backupWarning: string | null }
+export interface AppInfo { dataDir: string; version: string; lastBackup: string | null; backupWarning: string | null; distribution: 'installed'|'portable'|'development'|'test'; needsSetup: boolean }
 export interface ImportantDayInput {
   id?: string; name: string; calendar: 'solar' | 'lunar'; year: number | null; month: number; day: number;
   isLeapMonth: boolean;
@@ -38,6 +38,7 @@ export interface NotesAPI {
   openAttachment(id: string): Promise<void>; openLink(url: string): Promise<void>;
   backup(): Promise<string | null>; restoreBackup(): Promise<boolean>; exportNotes(id?: string): Promise<string | null>;
   info(): Promise<AppInfo>; openDataDir(): Promise<void>;
+  importLegacy(): Promise<boolean>; finishInstallSetup(): Promise<void>;
   readClipboardText(): Promise<string>; writeClipboardText(text: string): Promise<void>;
   showTextMenu(options: TextMenuOptions): Promise<TextMenuAction | null>;
   readyToClose(): Promise<void>; onCloseRequested(callback: () => void): () => void;
