@@ -4,7 +4,7 @@ try {
   $destination=[IO.Path]::GetFullPath($env:MEMO_INSTALLER_DIR).TrimEnd('\')
   $data=[IO.Path]::GetFullPath($env:MEMO_INSTALLER_DATA).TrimEnd('\')
   $registered=$env:MEMO_INSTALLED_DIR;$default=$env:MEMO_DEFAULT_DIR
-  $initialized=Test-MemoInitialized $data;$source='';$legacyExe=''
+  $initialized=Test-MemoInitialized $data;$source='';$legacyExe='';$reason='exact'
   $identity=Find-MemoIdentity $destination
   if(-not $identity-and (Test-Path -LiteralPath (Join-Path $destination 'notes.sqlite'))){
     $parent=Get-MemoIdentity ([IO.Path]::GetDirectoryName($destination))
@@ -12,6 +12,7 @@ try {
   }
   if($identity-and $identity.kind-eq 'installed'){$destination=$identity.root}
   if($identity-and $identity.kind-eq 'portable'){
+    $reason='portable'
     if(-not $initialized-and (Test-Path -LiteralPath (Join-Path $identity.data 'notes.sqlite'))){if(-not (Test-MemoDatabase $identity.data)){exit 22};$source=$identity.data;$legacyExe=$identity.exe}
     if($registered){$destination=$registered}else{$destination=$default}
   }
@@ -23,7 +24,6 @@ try {
     }
   }
   $destination=[IO.Path]::GetFullPath($destination).TrimEnd('\')
-  if($destination-eq [IO.Path]::GetPathRoot($destination).TrimEnd('\')){exit 11}
   if($destination-eq $data-or $destination.StartsWith($data+'\',[StringComparison]::OrdinalIgnoreCase)-or $data.StartsWith($destination+'\',[StringComparison]::OrdinalIgnoreCase)){exit 11}
   $ancestor=$destination
   while($ancestor){if(Test-Path -LiteralPath $ancestor){$item=Get-Item -LiteralPath $ancestor -Force;if(-not $item.PSIsContainer-or ($item.Attributes-band [IO.FileAttributes]::ReparsePoint)){exit 11}};$ancestor=[IO.Path]::GetDirectoryName($ancestor)}
@@ -33,11 +33,25 @@ try {
   if($targetIdentity-and $targetIdentity.kind-eq 'installed'){$owned=$true}
   $receipt=Join-Path $data '安装记录.json'
   if(-not $owned-and (Test-Path -LiteralPath $receipt)){$old=Get-Content -LiteralPath $receipt -Raw -Encoding UTF8|ConvertFrom-Json;if($old.appId-eq $env:MEMO_APP_ID-and $old.guid-eq $env:MEMO_APP_GUID-and $old.programDir-eq $destination){$owned=$true}}
-  if(-not $owned-and (Test-Path -LiteralPath $destination)-and @(Get-ChildItem -LiteralPath $destination -Force).Count-gt 0){exit 12}
-  [IO.Directory]::CreateDirectory($destination)|Out-Null
-  $probe=Join-Path $destination ('.suishouji-write-check-'+[guid]::NewGuid());$s=[IO.File]::Open($probe,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write);$s.Dispose();[IO.File]::Delete($probe)
+  # A selected software container is not itself owned by the installer. Always use
+  # an application child, even for an empty container; preserve exact owned paths.
+  $leaf=[IO.Path]::GetFileName($destination)
+  if(-not $owned-and $reason-ne 'portable'-and $leaf-notin @('随手记','suishouji')){
+    $destination=Join-Path ($destination+'\') '随手记';$reason='subfolder'
+  }
+  if($destination-eq [IO.Path]::GetPathRoot($destination).TrimEnd('\')){exit 11}
+  if($destination-eq $data-or $destination.StartsWith($data+'\',[StringComparison]::OrdinalIgnoreCase)-or $data.StartsWith($destination+'\',[StringComparison]::OrdinalIgnoreCase)){exit 11}
+  if(Test-Path -LiteralPath $destination){
+    $item=Get-Item -LiteralPath $destination -Force
+    if(-not $item.PSIsContainer-or ($item.Attributes-band [IO.FileAttributes]::ReparsePoint)){exit 11}
+    if(-not $owned-and @(Get-ChildItem -LiteralPath $destination -Force).Count-gt 0){exit 12}
+  }
+  if($env:MEMO_LOCATION_PREVIEW-ne '1'){
+    [IO.Directory]::CreateDirectory($destination)|Out-Null
+    $probe=Join-Path $destination ('.suishouji-write-check-'+[guid]::NewGuid());$s=[IO.File]::Open($probe,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write);$s.Dispose();[IO.File]::Delete($probe)
+  }
   if($initialized){$source='';$legacyExe=''}
-  $content="[plan]`r`nprogram=$destination`r`nsource=$source`r`nlegacyExe=$legacyExe`r`n"
+  $content="[plan]`r`nprogram=$destination`r`nsource=$source`r`nlegacyExe=$legacyExe`r`nreason=$reason`r`n"
   [IO.File]::WriteAllText($env:MEMO_PLAN_FILE,$content,[Text.Encoding]::Unicode)
   exit 0
 }catch{exit 13}

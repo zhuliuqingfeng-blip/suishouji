@@ -55,7 +55,7 @@ function Get-MemoFileHash([string]$file) {
 function Find-MemoIdentity([string]$folder) {
   $found=Get-MemoIdentity $folder
   if($found){return $found}
-  foreach($relative in @('随手记','release\随手记')){
+  foreach($relative in @('随手记','suishouji','release\随手记')){
     $found=Get-MemoIdentity (Join-Path $folder $relative)
     if($found){return $found}
   }

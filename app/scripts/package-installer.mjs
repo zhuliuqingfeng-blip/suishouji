@@ -18,7 +18,7 @@ await build({targets:Platform.WINDOWS.createTarget(['nsis'],Arch.x64),publish:'n
   nsis:{
     // Stable upgrade identity. Never regenerate for a release or distribution path.
     guid:locationQA?'8f0de495-bfe9-43aa-bb9f-e7ce5277c862':'42be8a92-8942-4f4c-9e2c-90bd703acc4c',oneClick:false,perMachine:false,allowElevation:false,
-    // installer.nsh inserts the native directory page without the upstream hidden path suffix.
+    // Our directory page previews a dedicated app folder before installation starts.
     allowToChangeInstallationDirectory:false,deleteAppDataOnUninstall:false,createDesktopShortcut:false,
     createStartMenuShortcut:true,shortcutName:locationQA?'随手记（安装验收）':'随手记',uninstallDisplayName:locationQA?'随手记（安装验收）':'随手记',runAfterFinish:true,
     installerLanguages:['zh_CN'],language:'2052',include:locationQA?'scripts/installer/installer-qa.nsh':'scripts/installer/installer.nsh'

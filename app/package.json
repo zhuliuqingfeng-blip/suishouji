@@ -1,6 +1,6 @@
 {
   "name": "suishouji",
-  "version": "1.8.2",
+  "version": "1.8.3",
   "private": true,
   "description": "完全保存在本地的个人图文随手记",
   "author": "Local Notes",
@@ -32,6 +32,7 @@
     "package:installer": "npm run build && node scripts/package-installer.mjs",
     "package:all": "npm run package && node scripts/package-installer.mjs",
     "test:installer-location": "node scripts/reliable-upgrade-test.mjs",
+    "test:installer-folders": "node scripts/installer-folders-test.mjs",
     "test:installer-upgrades": "node scripts/reliable-upgrade-test.mjs"
   },
   "build": {
