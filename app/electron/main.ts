@@ -8,20 +8,22 @@ import { createBackup, validateBackup, applyRestore, recoverInterruptedRestore, 
 import type { Filter, NoteInput, TextMenuAction, TextMenuOptions, ImportantDayInput } from './shared.js';
 import { fitWindow,readWindowState,writeWindowState } from './window-state.js';
 import {storageLocation} from './storage-location.js';
-import {emptyData,legacyRoot,recoverLegacyImport,pendingLegacyImport,requestLegacyImport,importLegacyData,clearLegacyRequest} from './legacy-import.js';
+import {emptyData,legacyRoot,recoverLegacyImport,pendingLegacyImport,requestLegacyImport,importLegacyData,clearLegacyRequest,importWorkDir} from './legacy-import.js';
 import {ensureLegacyClosed} from './windows-process.js';
 import {backupBeforeVersion,rememberVersion} from './version-backup.js';
+import {completeInstallerMaintenance,pendingInstallerMigration} from './installer-maintenance.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const testMode = process.env.NOTES_TEST_MODE === '1';
-const metadata=JSON.parse(fs.readFileSync(path.join(here,'../package.json'),'utf8')) as {distribution?:string};
+const metadata=JSON.parse(fs.readFileSync(path.join(here,'../package.json'),'utf8')) as {distribution?:string;installerIdentity?:{appId:string;guid:string}};
+const maintenance=process.argv.includes('--installer-maintenance');
 const {dataDir,distribution}=storageLocation({packaged:app.isPackaged,distribution:metadata.distribution,exe:app.getPath('exe'),localAppData:process.env.LOCALAPPDATA||path.join(app.getPath('home'),'AppData','Local'),developmentRoot:process.cwd(),testMode,testData:process.env.NOTES_DATA_DIR});
 fs.mkdirSync(dataDir, { recursive: true });
 app.setPath('userData', path.join(dataDir, '.运行缓存'));
 if(process.platform==='win32')app.setAppUserModelId(distribution==='installed'?'local.suishouji.desktop':'local.suishouji.desktop.portable');
 protocol.registerSchemesAsPrivileged([{ scheme: 'app-asset', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }]);
 let win: BrowserWindow | null = null, store: Store, busy = false, mayClose = false, backupWarning: string | null = null, lastBackup: string | null = null;
-const lock = app.requestSingleInstanceLock(); if (!lock) app.quit();
+const lock = app.requestSingleInstanceLock(); if (!lock) {if(maintenance)app.exit(6);else app.quit();}
 app.on('second-instance', () => { win?.show(); if (win?.isMinimized()) win.restore(); win?.focus(); });
 function dateStamp() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 function fileStamp() { return `${dateStamp()}-${new Date().toTimeString().slice(0,8).replaceAll(':','')}`; }
@@ -148,6 +150,7 @@ const methods: Record<string, (...args: any[]) => unknown> = {
 
 async function start() {
   if(distribution==='installed'){
+    if(pendingInstallerMigration(dataDir))await finishInstallation();
     recoverLegacyImport(dataDir);
     const source=pendingLegacyImport(dataDir);
     if(source){
@@ -202,5 +205,13 @@ async function start() {
   // If the UI cannot start, provide a native exit path instead of trapping the window.
   win.webContents.on('render-process-gone', () => { mayClose = true; dialog.showErrorBox('界面异常', '界面意外关闭。已保存的数据仍在本地，请重新打开随手记。'); win?.close(); });
 }
-if (lock) app.whenReady().then(start).catch(error => { dialog.showErrorBox('随手记无法启动', `原有数据不会被清除。\n${error instanceof Error ? error.message : error}\n\n数据位置：${dataDir}`); app.exit(1); });
+async function finishInstallation(){
+  return completeInstallerMaintenance({dataDir,programDir:path.dirname(app.getPath('exe')),version:app.getVersion(),appId:metadata.installerIdentity?.appId??'local.suishouji.desktop',guid:metadata.installerIdentity?.guid??'42be8a92-8942-4f4c-9e2c-90bd703acc4c'});
+}
+if(lock&&maintenance){
+  app.whenReady().then(async()=>{if(distribution!=='installed')throw new Error('安装维护仅适用于正式安装版');await finishInstallation();app.exit(0);}).catch(error=>{
+    try{fs.mkdirSync(importWorkDir(dataDir),{recursive:true});fs.writeFileSync(path.join(importWorkDir(dataDir),'installer-error.txt'),error instanceof Error?error.message:String(error));}catch{}
+    app.exit(5);
+  });
+}else if (lock) app.whenReady().then(start).catch(error => { dialog.showErrorBox('随手记无法启动', `原有数据不会被清除。\n${error instanceof Error ? error.message : error}\n\n数据位置：${dataDir}`); app.exit(1); });
 app.on('window-all-closed', () => { try { store?.close(); } catch {} app.quit(); });

@@ -125,6 +125,8 @@ export function clearLegacyRequest(target: string) { fs.rmSync(path.join(importW
 export async function importLegacyData(target: string, selected: string, options: {
   ensureClosed: (root: string) => Promise<void>;
   checkpoint?: (step: string) => void;
+  origin?: string;
+  verify?: (target:string) => Promise<void>;
 }) {
   recoverLegacyImport(target);
   if (!emptyData(target)) throw new Error('当前已有资料，导入已停止，现有内容未更改');
@@ -144,7 +146,7 @@ export async function importLegacyData(target: string, selected: string, options
   const store = new Store(stage); store.close();
   await options.ensureClosed(source.root);
   await fsp.mkdir(path.join(stage,'attachments'),{recursive:true});
-  writeJSON(path.join(stage,'迁移记录.json'),{from:source.root,at:new Date().toISOString(),backup:operation,notes:source.notes,trash:source.trash,days:source.days});
+  writeJSON(path.join(stage,'迁移记录.json'),{from:options.origin??source.root,at:new Date().toISOString(),backup:operation,notes:source.notes,trash:source.trash,days:source.days});
   const relatives = (await fsp.readdir(stage)).filter(name=>name!=='.运行缓存');
   for (const name of ['Local Storage','window-state.json']) if (exists(path.join(stage,'.运行缓存',name))) relatives.push(path.join('.运行缓存',name));
   const journal: Journal = {id,committed:false,items:relatives.map(relative=>({relative,existed:exists(inside(target,relative))}))};
@@ -159,6 +161,7 @@ export async function importLegacyData(target: string, selected: string, options
       await fsp.mkdir(path.dirname(current),{recursive:true});await fsp.rename(next,current);
       options.checkpoint?.('installed:'+item.relative);
     }
+    await options.verify?.(target);
     journal.committed=true;writeJSON(path.join(work,'journal.json'),journal);
     options.checkpoint?.('committed');
     recoverLegacyImport(target);clearLegacyRequest(target);
