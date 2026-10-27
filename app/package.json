@@ -1,6 +1,6 @@
 {
   "name": "suishouji",
-  "version": "1.7.1",
+  "version": "1.8.3",
   "private": true,
   "description": "完全保存在本地的个人图文随手记",
   "author": "Local Notes",
@@ -13,6 +13,8 @@
     "start": "electron .",
     "test": "tsx --test tests/*.test.ts",
     "test:ui": "node scripts/ui-test.mjs",
+    "test:help": "node scripts/help-ui-test.mjs",
+    "test:installer": "node scripts/reliable-upgrade-test.mjs",
     "package": "npm run build && electron-builder --win dir --x64",
     "release": "node scripts/release.mjs",
     "test:workspace": "node scripts/batch-layout-test.mjs",
@@ -26,7 +28,12 @@
     "test:days": "node scripts/important-days-test.mjs",
     "test:lunar": "node scripts/lunar-ui-test.mjs",
     "test:numbering": "node scripts/numbering-ui-test.mjs",
-    "test:numbering-boundaries": "node scripts/numbering-boundaries-test.mjs"
+    "test:numbering-boundaries": "node scripts/numbering-boundaries-test.mjs",
+    "package:installer": "npm run build && node scripts/package-installer.mjs",
+    "package:all": "npm run package && node scripts/package-installer.mjs",
+    "test:installer-location": "node scripts/reliable-upgrade-test.mjs",
+    "test:installer-folders": "node scripts/installer-folders-test.mjs",
+    "test:installer-upgrades": "node scripts/reliable-upgrade-test.mjs"
   },
   "build": {
     "appId": "local.suishouji.desktop",
@@ -47,7 +54,10 @@
       "icon": "assets/icon.ico",
       "signExecutable": false
     },
-    "artifactName": "随手记-${version}-${arch}.${ext}"
+    "artifactName": "随手记-${version}-${arch}.${ext}",
+    "extraMetadata": {
+      "distribution": "portable"
+    }
   },
   "dependencies": {
     "lunar-typescript": "1.8.6",

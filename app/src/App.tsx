@@ -16,6 +16,8 @@ import type {ImportantDay} from '../electron/shared';
 import {dayDistance,occurrence} from '../electron/important-days';
 import {ContinuousOrderedList} from './numbering';
 import {NumberingControl} from './NumberingControl';
+import {HelpDialog} from './HelpDialog';
+import {InstallWelcome} from './InstallWelcome';
 
 const LocalImage = Image.extend({
   addAttributes() { return { ...this.parent?.(), assetId: { default: null }, width: { default: 560, renderHTML: attrs => ({ width: attrs.width, style: `max-width:100%;width:${attrs.width}px;height:auto` }) } }; }
@@ -353,14 +355,15 @@ export default function App() {
         {(inLibrary||inDocument)&&<button className="new-button" aria-label="新建记录" title="新建记录 Ctrl+N" disabled={blocked} onClick={()=>void newNote()}><Plus size={17}/><span>新建记录</span><kbd>Ctrl N</kbd></button>}
         <div className="settings-anchor"><IconButton title="数据与设置" disabled={blocked} onClick={()=>setMenu(!menu)}><Settings2 size={19}/></IconButton>
           {menu&&<div className="dropdown settings-menu" onClick={e=>e.stopPropagation()}>
-            <div className="menu-heading">本地资料管理</div>
+            <div className="menu-heading">{info?.distribution==='installed'?'安装版 · 资料独立保存':info?.distribution==='portable'?'免安装版 · 资料随文件夹携带':'本地资料管理'}</div>
             <div className="settings-summary" aria-label="资料近况"><span><b data-testid="settings-total">{overview.active}</b> 条手记 · 近7天更新 <b data-testid="home-week">{homeSnapshot(homeNotes,lastOpened,new Date()).updatedThisWeek}</b> 条</span><span className="settings-backup-state">{info?.lastBackup?`最近备份：${fullDate(info.lastBackup)}`:'暂无备份'}</span>{info?.backupWarning&&<p className="danger">{info.backupWarning}</p>}</div>
             <button onClick={()=>void act(()=>api.backup(),'备份已保存，可将备份复制到U盘')}><Download/>备份全部数据</button>
             <button onClick={()=>void act(async()=>{const restored=await api.restoreBackup();if(restored){setUndo(null);clearSelection();await days.refresh();}return restored;},'备份已恢复',true)}><ArchiveRestore/>从备份恢复</button>
+            {info?.distribution==='installed'&&<button onClick={()=>void act(()=>api.importLegacy())}><FolderOpen/>从免安装版导入</button>}
             <button onClick={()=>void act(()=>api.exportNotes(),'已导出为可直接查看的网页')}><Upload/>导出全部记录</button><div className="menu-line"/>
             <button onClick={()=>{setMenu(false);void changeView(true,'',true);}}><Trash2/>查看回收站{overview.trash>0?`（${overview.trash} 条）`:''}</button>
             <button onClick={()=>void api.openDataDir().catch(report)}><FolderOpen/>打开数据文件夹</button>
-            <button onClick={()=>{setMenu(false);setHelp(true);}}><BookOpen/>使用说明与数据位置</button>
+            <button aria-label="使用说明与数据位置" onClick={()=>{setMenu(false);setHelp(true);}}><BookOpen/>使用说明</button>
           </div>}
         </div>
       </div>
@@ -443,23 +446,7 @@ export default function App() {
     {operation && <div className="busy-overlay"><LoaderCircle size={28} className="spin"/><strong>正在处理本地数据</strong><span>请稍候，完成后就可以继续记录。</span></div>}
     {zoom && <div className="image-modal" role="dialog" aria-label="查看图片" onClick={() => setZoom(null)}><button aria-label="关闭图片"><X size={24}/></button><img src={zoom} alt="记录中的图片"/><span>点击任意位置或按 Esc 关闭</span></div>}
     {linkValue !== null && <div className="modal-backdrop" onClick={() => setLinkValue(null)}><div className="help-dialog" role="dialog" aria-label="插入网页链接" onClick={e => e.stopPropagation()}><button className="modal-close" aria-label="关闭链接设置" onClick={() => setLinkValue(null)}><X size={19}/></button><h2>添加一个网页链接</h2><p>输入 http:// 或 https:// 开头的网址。留空可以移除当前链接。</p><form className="link-form" onSubmit={e => { e.preventDefault(); const href = linkValue.trim(); if (!href) editor?.chain().focus().extendMarkRange('link').unsetLink().run(); else if (/^https?:\/\//i.test(href)) editor?.chain().focus().extendMarkRange('link').setLink({href}).run(); else { notify('请输入 http:// 或 https:// 开头的网页地址', true); return; } setLinkValue(null); }}><input aria-label="网页地址" autoFocus value={linkValue} onChange={e => setLinkValue(e.target.value)}/><button type="submit">确定</button></form></div></div>}
-    {help && <div className="modal-backdrop" onClick={() => setHelp(false)}><div className="help-dialog" role="dialog" aria-label="使用说明" onClick={e => e.stopPropagation()}>
-      <button className="modal-close" aria-label="关闭说明" onClick={() => setHelp(false)}><X size={19}/></button><img className="help-brand" src={appMark} alt=""/><h2>从首页，慢慢开始。</h2>
-      <p>点击新建，直接输入。文字自动保存；截图可以粘贴，图片和文件可以拖入。标签输入后按回车即可添加。</p>
-      <div className="shortcut-help"><span><kbd>Ctrl N</kbd> 新建记录</span><span><kbd>Ctrl F</kbd> 搜索记录</span><span><kbd>Ctrl S</kbd> 立即保存</span></div>
-      <p>选中正文后按 <strong>Ctrl+Shift+C</strong> 复制为纯文本，按 <strong>Ctrl+Shift+V</strong> 粘贴为纯文本；也可右键正文或点击工具栏“纯文本”。去掉来源格式并保留换行，粘贴位置已有的段落或列表布局会保留。记录右上角“更多记录操作”可复制全文纯文本，包含标题和正文，不包含图片及附件。原有 Ctrl+C / Ctrl+V 保留格式复制和粘贴。</p>
-      <p>列表上方点击“多选”，或按住 Ctrl 点击记录。Shift 点击连续选择；全选只选中当前筛选结果。在列表中按 Delete 可以删除所选记录，输入文字时仍按正常文字编辑处理。</p>
-      <p>移入回收站后，右下角有 10 秒“撤销”。回收站可批量恢复或永久删除；右键记录也有常用操作。</p>
-      <p>每次打开先进入首页，点击“写点什么”开始一条新记录，或从下方继续写、回顾最近内容；不会自动新建空白页。顶部“首页”“手记库”和“重要日子”用于切换空间。回收站、资料数量和备份详情位于右上角“数据与设置”。首页按Ctrl+F可进入手记库并聚焦搜索；离开书写页会先完成保存。</p>
-      <p>重要日子支持公历日期，可每年重复，年份可以留空；不重复时需要年份。默认提前14天及当天在应用内提醒，首页日期附近只在临近时展示。关闭软件后不会提醒；每年2月29日在平年按2月最后一天提醒。重要日子与手记一起完整备份，农历将后续支持。</p>
-      <p>手记库按行展示记录，点击一行进入书写页；左上角“手记库”可返回完整索引。标签筛选、排序和多选位于索引上方。“数据与设置”中的“近7天更新”按本地日期统计今天及前六天，最近更新按实际修改时间排列，不受置顶、搜索或标签筛选影响。</p>
-      <p>手记库表头下方的分隔线可上下拖动，向上压缩标题区即可看到更多记录；双击恢复默认，也可用上下方向键调整。“紧凑视图”一次缩小标题区及行距，点击“舒展视图”还原。搜索、筛选和表头保持可用，选择会自动记住。</p>
-      <p>书写页上方的目录按钮可打开记录目录；拖动目录右边的分隔线调整宽度，双击恢复默认。专注模式隐藏顶部导航和目录，再次点击恢复。Ctrl+F 自动打开目录并聚焦搜索。目录宽度、筛选收起状态、排序和窗口大小都会记住。</p>
-      <p>再次打开先到首页，点击“继续上次”回到上次主动打开的有效记录。连续点击新建时，会继续使用当前的空白记录。</p>
-      <p>关闭窗口就会退出软件。换电脑前，先关闭软件，再复制<strong>整个软件文件夹</strong>，包含里面的“我的数据”。</p>
-      <p>每天首次打开时自动备份，保留最近七份。也可以在“数据与设置”中手动备份到U盘。恢复前会校验文件，并备份现有记录。</p>
-      <p>导出后，双击“打开我的记录.html”即可用浏览器查看。搜索范围为标题、正文、标签和附件名称。</p>
-      <div className="data-location"><span>你的数据位置</span><code>{info?.dataDir}</code><button onClick={() => void api.openDataDir().catch(report)}><FolderOpen size={14}/>打开文件夹</button></div><small>随手记 {info?.version} · {info?.lastBackup ? `最近备份：${fullDate(info.lastBackup)}` : '暂无备份'}</small>
-    </div></div>}
+    {help && <HelpDialog info={info} onClose={()=>setHelp(false)} onOpenDataDir={()=>api.openDataDir()}/>}
+    {info?.needsSetup&&<InstallWelcome api={api} onReady={()=>setInfo({...info,needsSetup:false})}/>}
   </div>;
 }

@@ -1,0 +1,62 @@
+.usage-help {
+  margin:auto;
+  padding:0;
+  width:min(640px,calc(100vw - 40px));
+  max-width:none;
+  max-height:min(780px,calc(100dvh - 48px));
+  overflow:hidden;
+  border:1px solid var(--line);
+  background:var(--paper);
+  color:var(--ink);
+  box-shadow:0 24px 80px #37344726;
+}
+.usage-help[open] { display:grid; grid-template-rows:auto minmax(0,1fr) auto }
+.usage-help::backdrop { background:#37344755; backdrop-filter:blur(2px) }
+.usage-help-heading { display:flex; align-items:center; gap:14px; padding:28px 32px 22px }
+.usage-help-heading>img { width:32px; height:32px }
+.usage-help-heading h2 { margin:0; font-size:21px; font-weight:600; line-height:1.5 }
+.usage-help-heading p { margin:4px 0 0; color:var(--muted); font-size:12px }
+.usage-help-close { align-self:flex-start; margin-left:auto; display:flex; padding:6px; background:none; color:var(--muted) }
+.usage-help-close:hover { background:var(--soft); color:var(--accent-deep) }
+.usage-help-body { overflow:auto; min-height:0; padding:0 32px 18px; overscroll-behavior:contain; scrollbar-gutter:stable }
+.usage-help-start { list-style:none; margin:0; padding:0; counter-reset:help-step }
+.usage-help-start li { position:relative; padding:8px 0 14px 36px; counter-increment:help-step }
+.usage-help-start li::before { content:counter(help-step,decimal-leading-zero); position:absolute; left:0; top:11px; font-size:11px; color:var(--coral); font-variant-numeric:tabular-nums }
+.usage-help-start strong { font-size:14px; font-weight:600; line-height:1.7 }
+.usage-help-start p,.usage-help-answer p { margin:5px 0 0; font-size:13px; line-height:1.85; color:var(--muted) }
+.usage-help-shortcuts { display:flex; flex-wrap:wrap; gap:12px 24px; margin:0 0 14px 36px; color:var(--muted); font-size:11px; line-height:1.8 }
+.usage-help-shortcuts kbd { margin-left:5px }
+.usage-help kbd { color:var(--accent-deep); font-size:11px }
+.usage-help-topics { border-top:1px solid var(--line) }
+.usage-help-topics details { border-bottom:1px solid var(--line) }
+.usage-help-topics summary { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:14px 0; cursor:pointer; list-style:none; font-size:13px; color:var(--accent-deep); line-height:1.6 }
+.usage-help-topics summary::-webkit-details-marker { display:none }
+.usage-help-topics summary:hover { color:var(--ink) }
+.usage-help-topics summary:focus-visible { outline:2px solid #8e80ae; outline-offset:-2px }
+.usage-help-topics summary svg { flex-shrink:0; color:var(--muted) }
+.usage-help-topics details[open]>summary svg { transform:rotate(180deg) }
+.usage-help-answer { padding:0 22px 17px 0 }
+.usage-help-answer p { margin:0 0 10px }
+.usage-help-answer p:last-child { margin-bottom:0 }
+.usage-help-answer strong { color:var(--ink); font-weight:600 }
+.usage-help-location { margin-top:16px; padding-top:14px; border-top:1px solid var(--line) }
+.usage-help-location>span { font-size:11px; color:var(--muted) }
+.usage-help-location code { display:block; margin:6px 0 10px; overflow-wrap:anywhere; font-size:12px; line-height:1.7; font-family:inherit; color:var(--muted) }
+.usage-help-location button { display:flex; align-items:center; gap:7px; padding:7px 0; background:none; color:var(--accent-deep); font-size:12px }
+.usage-help-location button:hover { text-decoration:underline }
+.usage-help-location [role=alert] { margin-top:8px; color:var(--danger) }
+.usage-help-footer { display:flex; justify-content:space-between; align-items:center; padding:16px 32px; gap:18px; border-top:1px solid var(--line) }
+.usage-help-footer>span { color:var(--muted); font-size:11px }
+.usage-help-footer>button { padding:9px 24px; background:var(--accent-deep); color:white; font-size:13px }
+.usage-help-footer>button:hover { background:var(--accent) }
+@media(max-width:600px) {
+  .usage-help-heading { padding:22px 22px 16px }
+  .usage-help-body { padding:0 22px 14px }
+  .usage-help-footer { padding:14px 22px }
+}
+.install-welcome { width:min(540px,calc(100vw - 40px)) }
+.install-welcome .usage-help-body>p { font-size:13px; line-height:1.9; margin:0 0 16px }
+.install-welcome .install-welcome-note { color:var(--muted); font-size:12px }
+.install-welcome .install-welcome-error { color:var(--danger) }
+.install-welcome .usage-help-footer { justify-content:flex-end }
+.install-welcome .usage-help-footer>.install-welcome-secondary { background:none; color:var(--muted); padding-inline:12px }

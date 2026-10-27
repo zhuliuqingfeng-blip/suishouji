@@ -1704,10 +1704,6 @@ kbd {
   color:#755e82;
   background:none
 }
-.help-brand {
-  width:44px;
-  height:44px
-}
 .help-dialog h2 {
   font-size:25px;
   font-weight:400;
@@ -1722,51 +1718,6 @@ kbd {
 .help-dialog strong {
   color:#7e588d;
   font-weight:600
-}
-.shortcut-help {
-  display:flex;
-  flex-wrap:wrap;
-  gap:13px;
-  font-size:10px;
-  color:#776180;
-  margin:18px 0
-}
-.shortcut-help kbd {
-  font-size:9px;
-  border:1px solid #e1d2e9;
-  padding:3px 4px;
-  margin-right:4px
-}
-.data-location {
-  padding:16px 0;
-  margin:22px 0;
-  border-block:1px solid #e4d7eb
-}
-.data-location>span {
-  font-size:10px;
-  color:#765e7e
-}
-.data-location code {
-  font-family:inherit;
-  display:block;
-  font-size:11px;
-  line-height:1.8;
-  color:#7b5d86;
-  overflow-wrap:anywhere;
-  margin:8px 0 12px
-}
-.data-location button {
-  display:flex;
-  align-items:center;
-  gap:6px;
-  background:none;
-  padding:5px 0;
-  font-size:11px;
-  color:#7d5b8b
-}
-.help-dialog>small {
-  color:#76617e;
-  font-size:10px
 }
 .link-form {
   display:flex;
