@@ -1,6 +1,6 @@
 {
   "name": "suishouji",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "private": true,
   "description": "完全保存在本地的个人图文随手记",
   "author": "Local Notes",
@@ -30,7 +30,8 @@
     "test:numbering": "node scripts/numbering-ui-test.mjs",
     "test:numbering-boundaries": "node scripts/numbering-boundaries-test.mjs",
     "package:installer": "npm run build && node scripts/package-installer.mjs",
-    "package:all": "npm run package && node scripts/package-installer.mjs"
+    "package:all": "npm run package && node scripts/package-installer.mjs",
+    "test:installer-location": "node scripts/installer-location-test.mjs"
   },
   "build": {
     "appId": "local.suishouji.desktop",

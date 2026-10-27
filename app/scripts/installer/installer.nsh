@@ -21,6 +21,8 @@
 !macroend
 
 !macro customPageAfterChangeDir
+  # Respect the exact destination displayed to the user, including Chinese folder names.
+  !insertmacro MUI_PAGE_DIRECTORY
   Page custom MemoOptions MemoOptionsLeave
   Function MemoOptions
     ${If} $MemoWasInstalled == 1
@@ -46,6 +48,28 @@
   ${If} ${RunningX64}
     StrCpy $PowerShellPath "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
   ${EndIf}
+  !ifndef BUILD_UNINSTALLER
+    File /oname=$PLUGINSDIR\memo-location.ps1 "${MEMO_INSTALLER_SOURCE}\validate-location.ps1"
+    System::Call 'kernel32::SetEnvironmentVariable(t "MEMO_INSTALLER_DIR", t "$INSTDIR")'
+    System::Call 'kernel32::SetEnvironmentVariable(t "MEMO_INSTALLER_DATA", t "$LOCALAPPDATA\随手记")'
+    System::Call 'kernel32::SetEnvironmentVariable(t "MEMO_INSTALLED_DIR", t "$perUserInstallationFolder")'
+    nsExec::ExecToStack '"$PowerShellPath" -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\memo-location.ps1"'
+    Pop $R0
+    Pop $R1
+    ${If} $R0 != 0
+      ${IfNot} ${Silent}
+        StrCpy $R1 "无法写入这个位置，请选择当前用户可以读写的文件夹。"
+        ${If} $R0 == 11
+          StrCpy $R1 "这个位置包含个人资料、是磁盘根目录或链接目录。请选择单独的软件文件夹。"
+        ${ElseIf} $R0 == 12
+          StrCpy $R1 "这个文件夹已经有其他文件。请选择新建或空的软件文件夹，以免卸载时影响原有文件。"
+        ${EndIf}
+        MessageBox MB_OK|MB_ICONEXCLAMATION "$R1$\r$\n旧程序和资料未改动。"
+      ${EndIf}
+      SetErrorLevel 3
+      Quit
+    ${EndIf}
+  !endif
   File /oname=$PLUGINSDIR\memo-close.ps1 "${MEMO_INSTALLER_SOURCE}\close-app.ps1"
   System::Call 'kernel32::SetEnvironmentVariable(t "MEMO_INSTALLER_EXE", t "$INSTDIR\${APP_EXECUTABLE_FILENAME}")'
   nsExec::ExecToStack '"$PowerShellPath" -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\memo-close.ps1"'
@@ -63,9 +87,9 @@
 !macro customInstall
   ${If} $MemoDesktop == 1
     ${If} $MemoWasInstalled == 0
-    ${OrIf} ${FileExists} "$DESKTOP\随手记.lnk"
-      CreateShortCut "$DESKTOP\随手记.lnk" "$INSTDIR\${APP_EXECUTABLE_FILENAME}" "" "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
-      WinShell::SetLnkAUMI "$DESKTOP\随手记.lnk" "${APP_ID}"
+    ${OrIf} ${FileExists} "$DESKTOP\${SHORTCUT_NAME}.lnk"
+      CreateShortCut "$DESKTOP\${SHORTCUT_NAME}.lnk" "$INSTDIR\${APP_EXECUTABLE_FILENAME}" "" "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
+      WinShell::SetLnkAUMI "$DESKTOP\${SHORTCUT_NAME}.lnk" "${APP_ID}"
     ${EndIf}
   ${EndIf}
   WriteRegDWORD HKCU "${INSTALL_REGISTRY_KEY}" MemoDesktop $MemoDesktop
@@ -81,7 +105,7 @@
   ${IfNot} ${isUpdated}
     ReadRegDWORD $R0 HKCU "${INSTALL_REGISTRY_KEY}" MemoDesktop
     ${If} $R0 == 1
-      Delete "$DESKTOP\随手记.lnk"
+      Delete "$DESKTOP\${SHORTCUT_NAME}.lnk"
     ${EndIf}
   ${EndIf}
 !macroend

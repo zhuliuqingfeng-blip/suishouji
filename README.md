@@ -46,7 +46,7 @@ Windows 64 位 · 安装版 / 免安装版 · 离线可用 · 数据保存在本
 ## 开始使用
 
 1. 打开 **[最新版下载页](https://github.com/zhuliuqingfeng-blip/suishouji/releases/latest)**，在 **Assets** 选择文件。
-2. **推荐安装版**：运行 `suishouji-版本号-setup-x64.exe`，按提示安装。以后的更新也直接运行新版安装包。
+2. **推荐安装版**：运行 `suishouji-版本号-setup-x64.exe`，可以自选程序位置。以后的更新直接运行新版安装包，默认沿用上次的位置。
 3. **免安装版**：下载 Windows x64 的 `.zip`，完整解压后双击 `随手记.exe`。需要随文件夹携带资料时可选这一版。
 4. 点击“写点什么”，记下第一件想留下的事。无需配置 Node.js 或数据库。
 

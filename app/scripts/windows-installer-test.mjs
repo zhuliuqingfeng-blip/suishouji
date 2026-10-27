@@ -11,7 +11,8 @@ const execute=promisify(execFile),guid='42be8a92-8942-4f4c-9e2c-90bd703acc4c';
 const root=path.join(testRoot,'windows-installer-'+Date.now()),program=path.join(root,'program');
 const local=path.join(root,'local'),data=path.join(local,'随手记'),migratedLocal=path.join(root,'migrated-local'),migrated=path.join(migratedLocal,'随手记');
 const previous=path.join(repoRoot,'.artifacts/installer-previous/suishouji-1.7.99-setup-x64.exe');
-const setup=path.join(repoRoot,'.artifacts/installer/suishouji-1.8.0-setup-x64.exe');
+const version=JSON.parse(await fs.readFile(path.join(appRoot,'package.json'),'utf8')).version;
+const setup=path.join(repoRoot,`.artifacts/installer/suishouji-${version}-setup-x64.exe`);
 const executable=path.join(program,'随手记.exe'),uninstaller=path.join(program,'Uninstall 随手记.exe');
 const desktop=path.join(process.env.USERPROFILE,'Desktop','随手记.lnk'),menu=path.join(process.env.APPDATA,'Microsoft/Windows/Start Menu/Programs/随手记.lnk');
 await fs.mkdir(root,{recursive:true});
@@ -66,10 +67,10 @@ try{
   const backups=await fs.readdir(path.join(data,'自动备份'));const backupHashes=await Promise.all(backups.map(async file=>[file,await hash(path.join(data,'自动备份',file))]));
   const end=instance.waitForEvent('close');await install(setup);await end;instance=null;
   assert.deepEqual(snapshot(data),before);assert.deepEqual(await assetHashes(data),assetsBefore);
-  await launch();assert.equal((await page.evaluate(()=>window.notes.info())).version,'1.8.0');assert.deepEqual(await preferences(),prefsBefore);
+  await launch();assert.equal((await page.evaluate(()=>window.notes.info())).version,version);assert.deepEqual(await preferences(),prefsBefore);
   assert.equal(await shortcut(menu),executable);assert.equal(await shortcut(desktop),executable);
   for(const [file,value] of backupHashes)assert.equal(await hash(path.join(data,'自动备份',file)),value);
-  assert.ok((await fs.readdir(path.join(data,'升级前备份'))).length);pass('1.7.99直接覆盖至1.8.0，正常保存退出，内容、图片、重要日子、布局、备份和快捷方式保持');
+  assert.ok((await fs.readdir(path.join(data,'升级前备份'))).length);pass(`1.7.99直接覆盖至${version}，正常保存退出，内容、图片、重要日子、布局、备份和快捷方式保持`);
   const other=await run(executable,[],{LOCALAPPDATA:local,NOTES_TEST_MODE:'0',NOTES_DATA_DIR:''});assert.equal(other.code,0);assert.equal((await instance.windows()).length,1);pass('重复启动复用已有窗口');
   await close();const beforeUninstall=snapshot(data),beforeUninstallAssets=await assetHashes(data);
   // Interrupt the real installer only after it has begun replacing its own program files.
