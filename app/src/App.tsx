@@ -7,12 +7,13 @@ import Image from '@tiptap/extension-image';
 import Placeholder from '@tiptap/extension-placeholder';
 import { Plus, Search, FolderOpen, Trash2, Pin, Settings2, ChevronDown, MoreHorizontal, ArrowUpRight, ArrowLeft, ArrowRight, SlidersHorizontal, PanelLeft, PanelTopClose, PanelTopOpen, Paperclip, ImagePlus, Bold, Italic, Heading2, List, ListOrdered, Link, Undo2, Redo2, X, Check, CircleAlert, RotateCcw, Download, Upload, FileText, ArchiveRestore, HardDrive, LoaderCircle, BookOpen, Maximize2, Focus, CheckSquare, ClipboardType, Copy } from 'lucide-react';
 import appMark from '../assets/icon.svg';
-import type { AppInfo, Attachment, Filter, MenuPosition, Note, NoteDetail, NoteSummary, Overview, RichNode,SortOrder,TextMenuAction } from '../electron/shared';
+import type { AppInfo, Attachment, Filter, MenuPosition, Note, NoteDetail, NoteSummary, Overview, RichNode,SortOrder,TextMenuAction,DayExportResult,DayImportPreview } from '../electron/shared';
 import {usePanels,Splitter,LibraryHeightSplitter,LIBRARY_HEADER,rangeSelection} from './layout';
 import {insertPlainText,notePlainText,plainText} from './plain-text';
 import {Home} from './Home';
 import {homeSnapshot,noteTitle} from './home-model';
 import {ImportantDaysPage,ImportantDayDialog,useImportantDays,type DayCloseHandler} from './ImportantDays';
+import {DayExportDialog,DayImportDialog} from './ImportantDaysTransfer';
 import type {ImportantDay} from '../electron/shared';
 import {dayDistance,occurrence} from '../electron/important-days';
 import {ContinuousOrderedList} from './numbering';
@@ -75,6 +76,11 @@ export default function App() {
   const [status, setStatus] = useState<'saved'|'dirty'|'saving'|'error'>('saved'), [operation, setOperation] = useState(false), [switching, setSwitching] = useState(true), [importing, setImporting] = useState(false);
   const days=useImportantDays(api,operation);
   const [dayDialog,setDayDialog]=useState<ImportantDay|'new'|null>(null);
+  const [dayMenu,setDayMenu]=useState(false),[dayExport,setDayExport]=useState<DayExportResult|null>(null);
+  const [dayImport,setDayImport]=useState<DayImportPreview|null>(null),[dayImportWorking,setDayImportWorking]=useState(false);
+  const [dayExportError,setDayExportError]=useState(''),[dayImportError,setDayImportError]=useState('');
+  // Focus goes back to the "⋯" button, not to the document start.
+  const dayReturnFocus=useRef<HTMLElement|null>(null);
   const dayCloseRequest=useRef<DayCloseHandler|null>(null);
   const [toast, setToast] = useState<{ message: string; error?: boolean } | null>(null), [menu, setMenu] = useState(false), [noteMenu, setNoteMenu] = useState(false), [help, setHelp] = useState(false);
   const [info, setInfo] = useState<AppInfo | null>(null), [zoom, setZoom] = useState<string | null>(null), [tagInput, setTagInput] = useState(''), [, forceToolbar] = useState(0);
@@ -311,6 +317,38 @@ export default function App() {
     if(blocked)return;setSwitching(true);
     try{if(!await flush())return;clearSelection();setMenu(false);setContext(null);setNoteMenu(false);setLayout(p=>({...p,view:'days',focused:false}));if(entry)setDayDialog(entry);await days.refresh();}catch(e){report(e);}finally{setSwitching(false);}
   }
+  // Important days travel in their own versioned file. Only the count, the
+  // preview summary and an opaque token cross the IPC boundary.
+  function rememberDayTrigger(){
+    // The focused menu item disappears with the dropdown, so return focus to the
+    // button that opened it instead of dropping the keyboard user on <body>.
+    const active=document.querySelector<HTMLElement>('.day-more')??document.activeElement;
+    dayReturnFocus.current=active instanceof HTMLElement?active:null;
+  }
+  async function exportDays(){
+    if(blocked)return;rememberDayTrigger();setDayMenu(false);setDayExportError('');setSwitching(true);
+    try{const result=await api.exportImportantDays();if(result)setDayExport(result);}
+    catch(e){report(e);}finally{setSwitching(false);}
+  }
+  async function chooseDaysFile(){
+    if(blocked){notify('正在处理数据，请稍候再试',true);return;}
+    rememberDayTrigger();setDayMenu(false);setDayImportError('');setSwitching(true);
+    try{const preview=await api.previewImportImportantDays();if(preview)setDayImport(preview);}
+    catch(e){report(e);}finally{setSwitching(false);}
+  }
+  async function applyDaysImport(choice:'local'|'incoming'){
+    if(!dayImport||dayImportWorking)return;
+    setDayImportWorking(true);setDayImportError('');
+    try{
+      const result=await api.applyImportImportantDays(dayImport.token,choice);setDayImport(null);await days.refresh(true);
+      const parts=[result.added?`新增 ${result.added} 条`:'',result.updated?`更新 ${result.updated} 条`:'',result.skipped?`跳过 ${result.skipped} 条重复记录`:'',result.keptLocal?`保留 ${result.keptLocal} 条本地记录`:''].filter(Boolean);
+      notify(result.added||result.updated?`重要日子已导入：${parts.join('，')}`:`没有新的重要日子${parts.length?`，${parts.join('，')}`:''}`);
+    }catch(e){
+      // The dialog stays open above the page, so its own message area is the only
+      // place the user can actually see the reason.
+      setDayImportError(e instanceof Error?e.message:String(e));
+    }finally{setDayImportWorking(false);}
+  }
   async function newNote() {
     if (blocked) return;
     clearSelection();setContext(null);
@@ -410,6 +448,16 @@ export default function App() {
   useEffect(()=>{clearSelection();setContext(null);},[query,tag,trash]);
   useEffect(()=>{const visible=new Set(list.map(n=>n.id));setChecked(previous=>{const next=new Set([...previous].filter(id=>visible.has(id)));return next.size===previous.size?previous:next;});},[list]);
   useEffect(()=>{localStorage.setItem('suishouji:sort',sort);anchor.current=null;},[sort]);
+  useEffect(()=>{if(layout.view!=='days')setDayMenu(false);},[layout.view]);
+  // A native <dialog> only blocks the pointer. While a transfer dialog is open,
+  // window shortcuts must not reach the page behind it, and closing the window
+  // has to go through this dialog first.
+  useEffect(()=>{
+    if(!dayImport&&!dayExport)return;
+    const handler:DayCloseHandler=(after)=>{setDayImport(null);setDayExport(null);after?.();};
+    dayCloseRequest.current=handler;
+    return ()=>{if(dayCloseRequest.current===handler)dayCloseRequest.current=null;};
+  },[dayImport,dayExport]);
   useEffect(()=>{if(!undo)return;const tick=()=>{const seconds=Math.max(0,Math.ceil((undo.expiresAt-Date.now())/1000));setUndoSeconds(seconds);if(!seconds)setUndo(null);};tick();const timer=setInterval(tick,250);return()=>clearInterval(timer);},[undo]);
   useLayoutEffect(()=>{if(searchPending.current&&layout.view!=='home'&&!switching){searchPending.current=false;focusEditor.current=false;searchInput.current?.focus();searchInput.current?.select();return;}if(focusEditor.current&&layout.view==='document'&&!switching){focusEditor.current=false;editor?.view.focus();}},[layout.focused,layout.indexHidden,layout.view,switching,editor]);
   useEffect(()=>{if(!context)return;const close=()=>setContext(null);window.addEventListener('resize',close);listArea.current?.addEventListener('scroll',close);return()=>{window.removeEventListener('resize',close);listArea.current?.removeEventListener('scroll',close);};},[context]);
@@ -429,7 +477,7 @@ export default function App() {
         if (!help && linkValue === null && !zoom && key === 'n') { e.preventDefault(); newNoteAction.current(); }
         if (!help && linkValue === null && !zoom && key === 'f') { e.preventDefault();void searchRecords(); }
       }
-      if (e.key === 'Escape') { setZoom(null); setHelp(false); setLinkValue(null); setMenu(false); setNoteMenu(false);setContext(null);if(!help&&linkValue===null&&!zoom)clearSelection(); if (!help && linkValue === null && !zoom && document.activeElement === searchInput.current) setQuery(''); }
+      if (e.key === 'Escape') { setZoom(null); setHelp(false); setLinkValue(null); setMenu(false); setNoteMenu(false);setDayMenu(false);setContext(null);if(!help&&linkValue===null&&!zoom)clearSelection(); if (!help && linkValue === null && !zoom && document.activeElement === searchInput.current) setQuery(''); }
     };
     window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key);
   }, [help, linkValue, zoom,layout.focused,layout.indexHidden,layout.view,blocked]);
@@ -448,7 +496,7 @@ export default function App() {
     <span>{operation?'正在处理数据…':importing?'正在保存附件…':status==='saved'?'所有更改已保存':status==='dirty'?'等待保存…':status==='saving'?'正在保存…':'保存失败'}</span>
     {status==='error'&&<button onClick={()=>void flush()}>重试保存</button>}
   </div>;
-  return <div className={`app-shell ${inHome?'home-mode':inDays?'days-mode':inLibrary?'library-mode':'document-mode'} ${inDocument&&layout.focused?'is-focused':''} ${layout.filtersCollapsed?'filters-collapsed':''} ${compactLibrary?'library-compact':''}`} style={layoutStyle} onClick={()=>{if(menu)setMenu(false);if(noteMenu)setNoteMenu(false);if(context)setContext(null);}}>
+  return <div className={`app-shell ${inHome?'home-mode':inDays?'days-mode':inLibrary?'library-mode':'document-mode'} ${inDocument&&layout.focused?'is-focused':''} ${layout.filtersCollapsed?'filters-collapsed':''} ${compactLibrary?'library-compact':''}`} style={layoutStyle} onClick={()=>{if(menu)setMenu(false);if(noteMenu)setNoteMenu(false);if(dayMenu)setDayMenu(false);if(context)setContext(null);}}>
     <header className="app-navigation" aria-label="主导航">
       <div className="app-brand"><img src={appMark} alt="" draggable={false}/><strong>随手记</strong></div>
       <nav className="space-tabs" aria-label="记录空间">
@@ -475,7 +523,7 @@ export default function App() {
     </header>
     <div className="workbench">
       {inHome&&<Home notes={homeNotes} lastId={lastOpened} info={info} busy={blocked} loaded={homeLoaded} onOpen={id=>void openNote(id)} onNew={()=>void newNote()} onBrowse={()=>void changeView(false,'',true)} onRetry={()=>void openHome()} days={days.entries} dayNow={days.now} onDay={entry=>void openImportantDays(entry)}/>}
-      {inDays&&<ImportantDaysPage entries={days.entries} now={days.now} error={days.error} loaded={days.loaded} busy={blocked} onAdd={()=>setDayDialog('new')} onOpen={setDayDialog} onRetry={()=>void days.refresh()}/>}
+      {inDays&&<ImportantDaysPage entries={days.entries} now={days.now} error={days.error} loaded={days.loaded} busy={blocked} onAdd={()=>setDayDialog('new')} onOpen={setDayDialog} onRetry={()=>void days.refresh()} onExport={()=>void exportDays()} onImport={()=>void chooseDaysFile()} moreOpen={dayMenu} onToggleMore={()=>setDayMenu(!dayMenu)}/>}
       <section className="notes-panel" aria-label={inLibrary?'手记库':'记录目录'} hidden={!indexVisible}>
         <div className="collection-heading" ref={libraryHeading}>
           <div><div className="section-overline">{trash?'已删除的记录':'文字 · 图片 · 文件'}</div><h1 title={tag||undefined}>{trash?'回收站':tag?tag:'手记库'}<span>{list.length} 条记录</span></h1><p>{trash?'留在这里，仍然可以找回。':'把值得留下的，放在一起。'}</p></div>
@@ -539,6 +587,8 @@ export default function App() {
     </div>
     <footer className="app-status"><span><HardDrive size={12}/><span>本地存储</span><b>·</b>{inHome?'首页':inDays?'重要日子':inLibrary?(trash?'回收站':'手记库'):layout.focused?'专注书写':'书写页'}</span>{saveStatus}<span className="status-hint">{inDays?'':inHome||inLibrary?'Ctrl N 新建 · Ctrl F 查找':note?.deletedAt?'回收站 · 只读':`${note?.plainText.replace(/\s/g,'').length??0} 字 · Ctrl S 保存`}</span></footer>
     {dayDialog&&<ImportantDayDialog entry={dayDialog} api={api} closeRequest={dayCloseRequest} onSaved={days.refresh} onClose={()=>setDayDialog(null)}/>}
+    {dayExport&&<DayExportDialog result={dayExport} error={dayExportError} returnFocus={dayReturnFocus} onReveal={()=>{setDayExportError('');void api.revealExportedFile().catch(e=>setDayExportError(e instanceof Error?e.message:String(e)));}} onClose={()=>{setDayExport(null);setDayExportError('');}}/>}
+    {dayImport&&<DayImportDialog preview={dayImport} error={dayImportError} working={dayImportWorking} returnFocus={dayReturnFocus} onCancel={()=>{setDayImport(null);setDayImportError('');}} onRetry={()=>{setDayImport(null);setDayImportError('');setTimeout(()=>void chooseDaysFile(),0);}} onConfirm={choice=>void applyDaysImport(choice)}/>}
     {!inHome&&!inDays&&!dayDialog&&!operation&&!toast&&!undo&&reminderEntry&&<div className="day-reminder" role="status"><button onClick={()=>void openImportantDays(reminderEntry)}><span>{reminderEntry.name} · {dayDistance(occurrence(reminderEntry,days.now).days)}{days.pending.length>1?`，另有${days.pending.length-1}个重要日子`:''}</span><ArrowUpRight size={14}/></button><button aria-label="收起日子提醒" onClick={()=>void days.acknowledge(days.pending.map(r=>r.key)).catch(report)}><X size={14}/></button></div>}
 
     {context&&<div className="dropdown context-menu" role="menu" aria-label="记录右键菜单" style={{left:Math.max(8,context.x),top:Math.max(8,context.y)}} onClick={e=>e.stopPropagation()} onKeyDown={e=>{if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();const buttons=[...e.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')],at=buttons.indexOf(document.activeElement as HTMLButtonElement);buttons[(at+(e.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length]?.focus();}}}>

@@ -19,6 +19,14 @@ export interface ImportantDayInput {
 }
 export interface ImportantDay extends ImportantDayInput { id: string; createdAt: string; updatedAt: string }
 export interface DayReminder { key: string; dayId: string; occurrence: string; stage: 'advance' | 'today' }
+export interface DayExportResult { path: string; count: number }
+export interface DayImportDifference { field: string; label: string; local: string; incoming: string }
+export interface DayImportConflict { title: string; differences: DayImportDifference[] }
+export interface DayImportPreview {
+  token: string; fileName: string; exportedAt: string | null; total: number;
+  added: number; duplicates: number; conflicts: DayImportConflict[];
+}
+export interface DayImportResult { added: number; updated: number; skipped: number; keptLocal: number }
 export type Result<T> = { ok: true; data: T } | { ok: false; error: string };
 export type TextMenuAction = 'copyPlain' | 'pastePlain' | 'copyAllPlain';
 export interface MenuPosition { x: number; y: number }
@@ -28,6 +36,10 @@ export interface NotesAPI {
   listImportantDays(): Promise<ImportantDay[]>; saveImportantDay(input: ImportantDayInput): Promise<ImportantDay>;
   removeImportantDay(id: string): Promise<void>; pendingDayReminders(): Promise<DayReminder[]>;
   acknowledgeDayReminders(keys: string[]): Promise<void>;
+  exportImportantDays(): Promise<DayExportResult | null>;
+  previewImportImportantDays(): Promise<DayImportPreview | null>;
+  applyImportImportantDays(token: string, conflict: 'local' | 'incoming'): Promise<DayImportResult>;
+  revealExportedFile(): Promise<void>;
   list(filter: Filter): Promise<NoteSummary[]>; overview(): Promise<Overview>;
   create(): Promise<NoteDetail>; get(id: string): Promise<NoteDetail>; save(input: NoteInput): Promise<Note>;
   pin(id: string, pinned: boolean): Promise<void>; trash(id: string): Promise<void>; restoreNote(id: string): Promise<void>;

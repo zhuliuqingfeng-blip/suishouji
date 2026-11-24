@@ -7,6 +7,32 @@
 .important-days-heading p {color:var(--muted);font-size:12px;line-height:1.8;margin:0}
 .day-add {display:inline-flex;align-items:center;gap:7px;background:transparent;color:var(--accent-deep);padding:10px 12px;flex-shrink:0;font-size:13px;font-weight:500;border-radius:3px}
 .day-add:hover {background:var(--soft)}
+.day-heading-actions {display:flex;align-items:center;gap:2px;flex-shrink:0}
+.day-more-anchor {position:relative}
+.day-more {display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;background:transparent;color:var(--muted);border-radius:3px}
+.day-more:hover,.day-more[aria-expanded=true] {background:var(--soft);color:var(--accent-deep)}
+.day-more-menu {right:0;top:calc(100% + 4px);min-width:186px}
+.day-more-menu button:disabled {color:#a9a3b4;cursor:default}
+.day-more-menu button:disabled svg {color:#a9a3b4}
+.day-more-menu button:disabled:hover {background:none}
+.day-transfer-body {padding:12px 28px 20px;overflow-y:auto;min-height:0}
+.day-transfer-lead {font-size:14px;line-height:1.9;margin:0 0 6px}
+.day-transfer-lead b {font-size:16px;font-weight:600}
+.day-transfer-file {font-size:11px;color:var(--muted);line-height:1.8;margin:0 0 18px;overflow-wrap:anywhere}
+.day-transfer-path {font-size:12px;line-height:1.8;margin:0 0 20px;padding:9px 11px;border:1px solid var(--line);border-radius:2px;background:#fffefa;overflow-wrap:anywhere;word-break:break-all;user-select:text}
+.day-transfer-body .day-form-help {margin:0 0 18px}
+.day-conflict {border-top:1px solid var(--line);padding-top:18px;margin:6px 0 0}
+.day-conflict h2 {font-size:12px;font-weight:500;margin:0 0 6px}
+.day-conflict-choice {display:flex;gap:3px;width:fit-content;margin-top:9px;padding:3px;border:1px solid var(--line);border-radius:3px}
+.day-conflict-choice button {font-size:12px;line-height:1.5;padding:6px 15px;background:transparent;color:var(--muted);border-radius:2px}
+.day-conflict-choice button[aria-pressed=true] {color:var(--accent-deep);background:var(--soft);font-weight:500}
+.day-conflict-choice button:hover {color:var(--accent-deep)}
+.day-conflict-list {list-style:none;padding:0;margin:16px 0 0;border-top:1px solid var(--line)}
+.day-conflict-list li {padding:12px 0;border-bottom:1px solid var(--line);font-size:11px;line-height:1.9;color:var(--muted)}
+.day-conflict-list li:last-child {border-bottom:0;padding-bottom:2px}
+.day-conflict-list strong {display:block;font-size:13px;font-weight:500;color:var(--ink);margin-bottom:3px;overflow-wrap:anywhere}
+.day-conflict-list em {font-style:normal;margin-right:6px;color:#8b8299}
+.day-conflict-list span {display:block;overflow-wrap:anywhere}
 .important-days-list {border-top:1px solid var(--line)}
 .important-day-row {display:flex;align-items:center;justify-content:space-between;gap:28px;min-height:96px;width:100%;padding:21px 0;background:none;border-bottom:1px solid var(--line);text-align:left}
 .important-day-row:hover,.important-day-row:focus-visible {background:transparent}
@@ -84,4 +110,4 @@
 .day-confirmation p {font-size:11px;color:var(--muted);line-height:1.8}
 .day-confirmation>div {display:flex;justify-content:flex-end;flex-wrap:wrap;gap:6px}
 @media(max-width:1050px) {.important-days-inner {max-width:800px;padding:28px 46px}.day-reminder>button:first-child span {max-width:340px}}
-@media(max-width:700px) {.important-days-inner {padding:24px 30px}.important-days-heading {align-items:flex-start;gap:15px}.important-days-heading h1 {font-size:25px}.important-day-row {gap:15px}.day-row-distance {gap:8px}.day-dialog-heading {padding:15px 20px 8px}.day-form,.day-detail {padding:12px 20px 20px}.day-dialog>.day-dialog-actions {padding:12px 20px 16px}}
+@media(max-width:700px) {.important-days-inner {padding:24px 30px}.important-days-heading {align-items:flex-start;gap:15px}.important-days-heading h1 {font-size:25px}.important-day-row {gap:15px}.day-row-distance {gap:8px}.day-dialog-heading {padding:15px 20px 8px}.day-form,.day-detail,.day-transfer-body {padding:12px 20px 20px}.day-dialog>.day-dialog-actions {padding:12px 20px 16px}}
