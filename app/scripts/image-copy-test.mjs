@@ -2,11 +2,14 @@ import { _electron as electron, chromium } from 'playwright';
 import electronPath from 'electron';
 import koffi from 'koffi';
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { appRoot, testRoot } from './paths.mjs';
+import { createTestClipboard } from './image-copy-test-clipboard.mjs';
 
 const execute = promisify(execFile);
 await fs.mkdir(testRoot, { recursive: true });
@@ -21,28 +24,21 @@ const fixtures = [
   { ext: 'gif', size: [1136, 71] },
 ];
 const [width, height] = fixtures[0].size;
-let instance, page, savedClipboard;
+const testClipboard = createTestClipboard();
+let instance, page, appPid;
 
 async function start() {
   instance = await electron.launch({ executablePath: exe || electronPath, cwd: appRoot,
     args: exe ? [] : ['.'], env: { ...process.env, NOTES_TEST_MODE: '1', NOTES_DATA_DIR: data } });
   page = await instance.firstWindow();
+  appPid = await instance.evaluate(() => process.pid);
   await page.getByRole('button', { name: '数据与设置', exact: true }).waitFor();
-  savedClipboard = await instance.evaluate(async ({ clipboard }) =>
-    Promise.all((await clipboard.read()).map(async item => Object.fromEntries(await Promise.all(item.types.map(async type => {
-      const value = await item.getType(type);
-      return [type, value instanceof Blob ? { blob: Array.from(new Uint8Array(await value.arrayBuffer())), mime: value.type } : { bookmark: value }];
-    }))))));
+  await testClipboard.snapshot();
 }
 
-async function restoreClipboard() {
-  if (savedClipboard === undefined) return;
-  await instance.evaluate(async ({ clipboard, ClipboardItem }, items) => {
-    if (!items.length) { clipboard.clear(); return; }
-    await clipboard.write(items.map(item => new ClipboardItem(Object.fromEntries(Object.entries(item).map(([type, value]) =>
-      [type, value.blob ? new Blob([new Uint8Array(value.blob)], { type: value.mime }) : value.bookmark])))));
-  }, savedClipboard);
-  savedClipboard = undefined;
+async function recordAppClipboardWrite(action) {
+  try { await action(); }
+  finally { await testClipboard.rememberWrite(appPid); }
 }
 
 async function clipboardInfo() {
@@ -105,8 +101,10 @@ async function checkCutDuringImageRead(image, source, field, expected, isTitle) 
       });
       await page.waitForFunction(value => window.getSelection().toString() === value, expected);
     }
-    await page.keyboard.press('Control+x');
-    assert.equal(await instance.evaluate(({ clipboard }) => clipboard.readText()), expected);
+    await recordAppClipboardWrite(async () => {
+      await page.keyboard.press('Control+x');
+      assert.equal(await instance.evaluate(({ clipboard }) => clipboard.readText()), expected);
+    });
     await release();
     // Allow the resumed image request time to reach the clipboard if it was not canceled.
     await page.waitForTimeout(500);
@@ -120,22 +118,49 @@ async function checkCutDuringImageRead(image, source, field, expected, isTitle) 
 
 async function checkExternalClipboardDuringImageRead(image, source) {
   const expected = '其他 Windows 应用刚写入的文字';
-  await withDelayedImageRead(image, source, async release => {
-    await execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-STA', '-Command', `
-      $ErrorActionPreference='Stop'
-      Add-Type -AssemblyName System.Windows.Forms
-      [Windows.Forms.Clipboard]::SetText($env:MEMO_TEST_TEXT)
-    `], { env: { ...process.env, MEMO_TEST_TEXT: expected }, windowsHide: true });
-    assert.equal((await clipboardInfo()).text, expected);
-    await release();
-    await page.getByText('剪贴板已有更新，已取消图片复制', { exact: true }).waitFor({ timeout: 5000 });
-    const afterRead = await clipboardInfo();
-    assert.equal(afterRead.text, expected);
-    assert.equal(afterRead.size, null);
-    const title = page.getByLabel('记录标题');
-    await title.fill('');
-    await title.press('Control+v');
-    assert.equal(await title.inputValue(), expected);
+  await withDelayedImageRead(image, source, release => withExternalClipboardWriter(expected, async pid => {
+    try {
+      assert.ok(await testClipboard.rememberWrite(pid), '应能确认外部测试进程拥有剪贴板');
+      assert.equal((await clipboardInfo()).text, expected);
+      await release();
+      await page.getByText('剪贴板已有更新，已取消图片复制', { exact: true }).waitFor({ timeout: 5000 });
+      const afterRead = await clipboardInfo();
+      assert.equal(afterRead.text, expected);
+      assert.equal(afterRead.size, null);
+      const title = page.getByLabel('记录标题');
+      await title.fill('');
+      await title.press('Control+v');
+      assert.equal(await title.inputValue(), expected);
+      await checkCleanupPreservesExternalWrite();
+    } finally {
+      await testClipboard.restore();
+    }
+  }));
+}
+
+async function withExternalClipboardWriter(text, action) {
+  const helper = fileURLToPath(new URL('./image-copy-test-clipboard.mjs', import.meta.url));
+  const writer = spawn(process.execPath, [helper, '--fixture-writer', text], { windowsHide: true, stdio: ['pipe', 'pipe', 'inherit'] });
+  const closed = once(writer, 'close');
+  try {
+    await Promise.race([
+      once(writer.stdout, 'data', { signal: AbortSignal.timeout(10000) }),
+      closed.then(([code]) => { throw new Error(`外部剪贴板进程提前退出 (${code})`); }),
+    ]);
+    await action(writer.pid);
+  } finally { writer.stdin.end(); await closed; }
+}
+
+async function checkCleanupPreservesExternalWrite() {
+  const newer = '退出前另一进程又写入了剪贴板';
+  await withExternalClipboardWriter(newer, async pid => {
+    try {
+      assert.equal(await testClipboard.restore(), false, '清理必须跳过另一进程写入的新内容');
+      assert.equal((await clipboardInfo()).text, newer);
+    } finally {
+      // This particular foreign write was a fixture that we deliberately triggered.
+      if (await testClipboard.rememberWrite(pid)) assert.equal(await testClipboard.restore(), true);
+    }
   });
 }
 
@@ -242,6 +267,8 @@ try {
       $bitmap=[Drawing.Image]::FromFile($inputFile)
       try { $bitmap.Save($outputFile,$format) } finally { $bitmap.Dispose() }
     }
+    $seed=[Drawing.Image]::FromFile((Join-Path $env:MEMO_TEST_FIXTURES 'copy.png'))
+    try { $seed.Save((Join-Path $env:MEMO_TEST_FIXTURES 'seed.bmp'),[Drawing.Imaging.ImageFormat]::Bmp) } finally { $seed.Dispose() }
   `], { env: { ...process.env, MEMO_TEST_FIXTURES: root }, windowsHide: true });
 
   await page.keyboard.press('Control+n');
@@ -255,10 +282,8 @@ try {
     return { id: note.id, images };
   }, sources.slice(1));
   // Use the normal clipboard insertion path for the PNG and saved fixtures for the other formats.
-  await instance.evaluate(async ({ clipboard, ClipboardItem }, base64) => {
-    const bytes = Buffer.from(base64, 'base64');
-    await clipboard.write([new ClipboardItem({ 'image/png': new Blob([bytes], { type: 'image/png' }) })]);
-  }, pixels[0]);
+  const seedBitmap = await fs.readFile(path.join(root, 'seed.bmp'));
+  await testClipboard.writeImage(Buffer.from(pixels[0], 'base64'), seedBitmap.subarray(14));
   await page.keyboard.press('Control+v');
   await page.locator('.tiptap img').waitFor();
   await page.keyboard.press('Control+s');
@@ -273,7 +298,8 @@ try {
     return api.get(id);
   }, testNote);
   // Restore before closing so a failed restart cannot leave the test image on the clipboard.
-  await restoreClipboard();
+  await testClipboard.rememberWrite(process.pid);
+  await testClipboard.restore();
   await instance.close(); instance = null;
   await start();
   await page.getByRole('button', { name: '继续上次记录', exact: true }).click();
@@ -297,23 +323,29 @@ try {
     };
   });
   const rightClickMarker = '等待右键复制图片';
-  await instance.evaluate(({ clipboard }, marker) => clipboard.writeText(marker), rightClickMarker);
+  await testClipboard.writeText(rightClickMarker);
   assert.deepEqual(await clipboardInfo(), { size: null, text: rightClickMarker, html: false });
-  await images.first().click({ button: 'right' });
-  await checkClipboardImage(fixtures[0]);
+  await recordAppClipboardWrite(async () => {
+    await images.first().click({ button: 'right' });
+    await checkClipboardImage(fixtures[0]);
+  });
   assert.deepEqual(await instance.evaluate(() => globalThis.__imageMenuLabels), ['复制图片']);
   assert.equal(await page.evaluate(() => window.getSelection().toString()), '普通文字依然可以复制');
   await checkNativePaste();
   await checkExternalAppPaste();
+  // Reading a synthesized bitmap can advance the clipboard sequence without changing its owner.
+  await testClipboard.rememberWrite(appPid);
   console.log('右键复制后，CF_DIBV5 为正高度、底行在前，WinForms 读取上下方向正确，Edge 可粘贴');
 
   for (const [i, fixture] of fixtures.entries()) {
-    await instance.evaluate(({ clipboard }) => clipboard.writeText('等待复制'));
+    await testClipboard.writeText('等待复制');
     // Distinct click positions avoid double-click detection when scrolling brings images to the same spot.
     await images.nth(i).click({ position: { x: 40 + i * 32, y: 5 } });
     await images.nth(i).and(page.locator('.ProseMirror-selectednode')).waitFor();
-    await page.keyboard.press('Control+c');
-    await checkClipboardImage(fixture);
+    await recordAppClipboardWrite(async () => {
+      await page.keyboard.press('Control+c');
+      await checkClipboardImage(fixture);
+    });
   }
   console.log('PNG、JPEG、WebP、BMP、GIF 经 Ctrl+C 复制为原分辨率图片');
 
@@ -326,8 +358,10 @@ try {
     const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
   });
   await page.waitForTimeout(100);
-  await page.keyboard.press('Control+c');
-  assert.deepEqual(await clipboardInfo(), { size: null, text: '普通文字依然可以复制', html: true });
+  await recordAppClipboardWrite(async () => {
+    await page.keyboard.press('Control+c');
+    assert.deepEqual(await clipboardInfo(), { size: null, text: '普通文字依然可以复制', html: true });
+  });
   const after = await page.evaluate(id => window.notes.get(id), testNote.id);
   assert.deepEqual(after, original);
   for (const [index, asset] of original.attachments.entries())
@@ -362,9 +396,11 @@ try {
   console.log('图片原件读取延迟时，标题和正文剪切的文字仍可粘贴');
   await checkExternalClipboardDuringImageRead(images.first(), source);
   console.log('独立 Windows 进程更新剪贴板时，旧图片复制取消，外部文字仍可粘贴');
+  console.log('退出清理保留更晚的跨进程写入，随后仅恢复已确认属于测试的夹具');
 } finally {
-  if (instance) {
-    try { await restoreClipboard(); }
-    finally { await instance.close(); }
+  try { await testClipboard.restore(); }
+  finally {
+    try { if (instance) await instance.close(); }
+    finally { testClipboard.dispose(); }
   }
 }
