@@ -42,11 +42,21 @@ function createBitmap(png: Buffer) {
   if (image.isEmpty()) throw new Error('Invalid clipboard PNG');
   const pixels = image.toBitmap();
   const { width, height } = image.getSize();
-  if (pixels.length !== width * height * 4) throw new Error('Invalid clipboard bitmap');
-  const header = Buffer.alloc(124); // BITMAPV5HEADER followed by top-down BGRA pixels.
+  const rowBytes = width * 4;
+  if (pixels.length !== rowBytes * height) throw new Error('Invalid clipboard bitmap');
+
+  // Some clipboard consumers require positive DIB height and bottom-up rows.
+  const row = Buffer.allocUnsafe(rowBytes);
+  for (let top = 0, bottom = pixels.length - rowBytes; top < bottom; top += rowBytes, bottom -= rowBytes) {
+    pixels.copy(row, 0, top, top + rowBytes);
+    pixels.copy(pixels, top, bottom, bottom + rowBytes);
+    row.copy(pixels, bottom);
+  }
+
+  const header = Buffer.alloc(124); // BITMAPV5HEADER followed by bottom-up BGRA pixels.
   header.writeUInt32LE(header.length, 0);
   header.writeInt32LE(width, 4);
-  header.writeInt32LE(-height, 8);
+  header.writeInt32LE(height, 8);
   header.writeUInt16LE(1, 12); // planes
   header.writeUInt16LE(32, 14); // bits per pixel
   header.writeUInt32LE(3, 16); // BI_BITFIELDS

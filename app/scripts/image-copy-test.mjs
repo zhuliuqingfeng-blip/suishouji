@@ -1,5 +1,6 @@
 import { _electron as electron, chromium } from 'playwright';
 import electronPath from 'electron';
+import koffi from 'koffi';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -139,17 +140,55 @@ async function checkExternalClipboardDuringImageRead(image, source) {
 }
 
 async function checkNativePaste() {
+  // Read CF_DIBV5 directly before WinForms can choose a synthesized clipboard format.
+  const user = koffi.load('user32.dll');
+  const kernel = koffi.load('kernel32.dll');
+  const open = user.func('int __stdcall OpenClipboard(void *window)');
+  const close = user.func('int __stdcall CloseClipboard()');
+  const getData = user.func('void * __stdcall GetClipboardData(uint32_t format)');
+  const size = kernel.func('size_t __stdcall GlobalSize(void *memory)');
+  const lock = kernel.func('void * __stdcall GlobalLock(void *memory)');
+  const unlock = kernel.func('int __stdcall GlobalUnlock(void *memory)');
+  const copy = kernel.func('void __stdcall RtlMoveMemory(void *destination, const void *source, size_t bytes)');
+  const headerSize = 124, rowBytes = width * 4;
+  let opened = false;
+  for (let attempt = 0; attempt < 20; attempt++) {
+    if (open(null)) { opened = true; break; }
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  assert.ok(opened, '应能打开 Windows 剪贴板读取位图');
+  try {
+    const memory = getData(17); // CF_DIBV5
+    assert.ok(memory && size(memory) >= headerSize + rowBytes * height, '剪贴板应含完整的 CF_DIBV5');
+    const pixels = lock(memory);
+    assert.ok(pixels, '应能读取 CF_DIBV5 内存');
+    try {
+      const header = Buffer.alloc(headerSize);
+      copy(header, pixels, header.length);
+      assert.equal(header.readUInt32LE(0), headerSize);
+      assert.equal(header.readInt32LE(4), width);
+      assert.equal(header.readInt32LE(8), height, 'CF_DIBV5 应使用正高度');
+      const pixel = Buffer.alloc(4);
+      copy(pixel, pixels + BigInt(headerSize), pixel.length);
+      assert.deepEqual([...pixel], [53, 143, 18, 255], '第一行应为图像底部的绿色');
+      copy(pixel, pixels + BigInt(headerSize + rowBytes * (height - 1)), pixel.length);
+      assert.deepEqual([...pixel], [49, 18, 223, 255], '最后一行应为图像顶部的红色');
+    } finally { unlock(memory); }
+  } finally { close(); }
+
   const script = `
     $ErrorActionPreference='Stop'
     Add-Type -AssemblyName System.Windows.Forms
     $bitmap=[Windows.Forms.Clipboard]::GetImage()
     if(!$bitmap){throw 'Native WinForms clipboard has no bitmap'}
-    $pixel=$bitmap.GetPixel(15,15)
-    @{width=$bitmap.Width;height=$bitmap.Height;red=$pixel.R;blue=$pixel.B}|ConvertTo-Json -Compress
-    $bitmap.Dispose()
+    try {
+      $top=$bitmap.GetPixel(15,8)
+      $bottom=$bitmap.GetPixel(15,$bitmap.Height-9)
+      @{width=$bitmap.Width;height=$bitmap.Height;top=@($top.R,$top.G,$top.B);bottom=@($bottom.R,$bottom.G,$bottom.B)}|ConvertTo-Json -Compress
+    } finally { $bitmap.Dispose() }
   `;
   const { stdout } = await execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-STA', '-Command', script], { windowsHide: true });
-  assert.deepEqual(JSON.parse(stdout), { width, height, red: 223, blue: 49 });
+  assert.deepEqual(JSON.parse(stdout), { width, height, top: [223, 18, 49], bottom: [18, 143, 53] });
 }
 
 async function checkExternalAppPaste() {
@@ -182,8 +221,9 @@ try {
   await start();
   const pixels = await page.evaluate(formats => formats.map(({ ext, size: [width, height] }) => {
     const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
-    const context = canvas.getContext('2d'); context.fillStyle = '#df1231'; context.fillRect(0, 0, width, height);
-    context.fillStyle = '#128f35'; context.fillRect(width - 50, 0, 50, height);
+    const context = canvas.getContext('2d'), split = Math.floor(height / 2);
+    context.fillStyle = '#df1231'; context.fillRect(0, 0, width, split);
+    context.fillStyle = '#128f35'; context.fillRect(0, split, width, height - split);
     const format = ext === 'bmp' || ext === 'gif' ? 'png' : ext;
     return canvas.toDataURL(`image/${format}`, 0.95).split(',')[1];
   }), fixtures);
@@ -265,7 +305,7 @@ try {
   assert.equal(await page.evaluate(() => window.getSelection().toString()), '普通文字依然可以复制');
   await checkNativePaste();
   await checkExternalAppPaste();
-  console.log('右键复制后，Windows WinForms 读到原分辨率位图，独立 Edge 窗口 Ctrl+V 收到图片');
+  console.log('右键复制后，CF_DIBV5 为正高度、底行在前，WinForms 读取上下方向正确，Edge 可粘贴');
 
   for (const [i, fixture] of fixtures.entries()) {
     await instance.evaluate(({ clipboard }) => clipboard.writeText('等待复制'));
