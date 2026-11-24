@@ -4,8 +4,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {Store} from '../electron/store.js';
 import {occurrence} from '../electron/important-days.js';
-import {buildDaysFile,serializeDaysFile,parseDaysFile,planDayImport,dayImportConflict,dayDateLabel,writeDaysFile,DAYS_FORMAT,DAYS_VERSION,MAX_DAYS_ROWS} from '../electron/important-days-transfer.js';
-import type {DayImportPlan} from '../electron/important-days-transfer.js';
+import {buildDaysFile,serializeDaysFile,parseDaysFile,planDayImport,dayImportConflict,dayDateLabel,writeDaysFile,isLiveDataPath,DAYS_FORMAT,DAYS_VERSION,MAX_DAYS_ROWS} from '../electron/important-days-transfer.js';
+import type {DayFileRecord,DayImportPlan} from '../electron/important-days-transfer.js';
 import type {ImportantDay,ImportantDayInput} from '../electron/shared.js';
 import {testRoot} from '../scripts/paths.mjs';
 
@@ -47,9 +47,11 @@ test('导出文件带格式标识与版本，农历保留原始月日、闰月�
 
 test('解析拒绝不是本软件的文件、过高版本、结构缺失、非法日期和超量记录',async()=>{
   const empty=serializeDaysFile(buildDaysFile([],new Map()));
-  assert.deepEqual(parseDaysFile(empty).rows,[]);
-  // 用记事本另存后可能带 BOM，不影响导入。
-  assert.deepEqual(parseDaysFile(`\uFEFF${empty}`).rows,[]);
+  // 应用不会导出 0 条的日子，空列表在预览前就拒绝，不能显示成“都已经存在”。
+  assert.throws(()=>parseDaysFile(empty),/文件里没有可以导入的重要日子/);
+  const minimal=JSON.stringify({format:DAYS_FORMAT,version:1,days:[{name:'某天',calendar:'solar',year:null,month:1,day:1,isLeapMonth:false,yearly:true,reminderDays:0,note:''}]});
+  // 用记事本另存后可能带 BOM，不影响解析。
+  assert.equal(parseDaysFile(`\uFEFF${minimal}`).rows.length,1);
   assert.throws(()=>parseDaysFile(''),/空的/);
   assert.throws(()=>parseDaysFile('不是JSON'),/有效的 JSON/);
   assert.throws(()=>parseDaysFile('[]'),/不是随手记的重要日子导出文件/);
@@ -178,5 +180,54 @@ test('写入文件先写临时文件再改名，覆盖保存后内容完整且�
   assert.equal(await fs.readFile(destination,'utf8'),next);
   assert.deepEqual((await fs.readdir(path.dirname(destination))).sort(),['随手记重要日子.json']);
   await assert.rejects(()=>writeDaysFile(path.join(root,'缺失目录','x.json'),'{}'),/无法保存重要日子文件/);
+  store.close();
+});
+
+test('同一日期名称有多条本地记录时优先匹配内容完全相同的那条，不误改另一条',async()=>{
+  const {store}=await fixture();
+  const first=store.saveImportantDay({...solarDay,note:'备注A'});
+  const second=store.saveImportantDay({...solarDay,note:'备注B'});
+  const rows=rowsOf(store);
+  // 没有可用编号的行（被手改过或来自更早的副本）只能靠内容识别。
+  const orphan:DayFileRecord={...rows.find(row=>row.id===second.id)!,id:undefined};
+  const planned=planDayImport(store.listImportantDays(),[orphan]);
+  assert.equal(planned.added.length,0);assert.equal(planned.duplicates,1);assert.equal(planned.conflicts.length,0);
+  const before=JSON.stringify(store.listImportantDays());
+  assert.deepEqual(store.importImportantDays([orphan],'incoming'),{added:0,updated:0,skipped:1});
+  assert.equal(JSON.stringify(store.listImportantDays()),before);
+  assert.equal(store.listImportantDays().find(day=>day.id===first.id)!.note,'备注A');
+  // 没有完全相同的候选时仍然只报冲突，写入前不改任何记录。
+  const changed:DayFileRecord={...orphan,note:'备注C'};
+  const conflictPlan=planDayImport(store.listImportantDays(),[changed]);
+  assert.equal(conflictPlan.duplicates,0);assert.equal(conflictPlan.added.length,0);assert.equal(conflictPlan.conflicts.length,1);
+  assert.equal(JSON.stringify(store.listImportantDays()),before);
+  store.close();
+});
+
+test('单次上限内的合并计划是线性耗时，不会长时间卡住主进程',()=>{
+  const rows:DayFileRecord[]=Array.from({length:MAX_DAYS_ROWS},(_,index)=>({name:`日子${index}`,calendar:'solar',year:null,month:1,day:1,isLeapMonth:false,yearly:true,reminderDays:0,note:'',createdAt:null,updatedAt:null,reminded:[]}));
+  const started=Date.now(),planned=planDayImport([],rows),elapsed=Date.now()-started;
+  assert.equal(planned.added.length,MAX_DAYS_ROWS);assert.equal(planned.duplicates,0);
+  assert.ok(elapsed<5000,`${MAX_DAYS_ROWS} 条合并计划耗时 ${elapsed}ms，超过 5 秒`);
+});
+
+test('导出路径保护不区分大小写，数据目录里的文件不会被覆盖',()=>{
+  const root=path.join('C:','数据');
+  assert.equal(isLiveDataPath(root,path.join(root,'notes.sqlite')),true);
+  assert.equal(isLiveDataPath(root,path.join(root,'NOTES.SQLITE')),true);
+  assert.equal(isLiveDataPath(root,path.join(root,'attachments','a.json')),true);
+  assert.equal(isLiveDataPath(root,path.join(root,'.运行缓存','x.json')),true);
+  assert.equal(isLiveDataPath(root,path.join(root,'导出','随手记重要日子.json')),false);
+  assert.equal(isLiveDataPath(root,path.join('C:','其他','notes.sqlite')),false);
+});
+
+test('备注只在可见部分相同、实际不同时，冲突列表会标出差异在后文',async()=>{
+  const {store}=await fixture();
+  const saved=store.saveImportantDay({...solarDay,note:`${'长'.repeat(100)}甲`});
+  const incoming:DayFileRecord={...rowsOf(store)[0],note:`${'长'.repeat(100)}乙`};
+  const conflict=dayImportConflict(saved,incoming);
+  const note=conflict.differences.find(item=>item.field==='note')!;
+  assert.match(note.local,/差异在后文/);assert.match(note.incoming,/差异在后文/);
+  assert.ok(note.local.length<110);
   store.close();
 });

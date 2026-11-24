@@ -6,7 +6,7 @@ import {randomUUID} from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Store } from './store.js';
 import { createBackup, validateBackup, applyRestore, recoverInterruptedRestore, exportHtml } from './archive.js';
-import {buildDaysFile,serializeDaysFile,writeDaysFile,parseDaysFile,planDayImport,dayImportConflict,MAX_DAYS_FILE_BYTES} from './important-days-transfer.js';
+import {buildDaysFile,serializeDaysFile,writeDaysFile,parseDaysFile,planDayImport,dayImportConflict,isLiveDataPath,MAX_DAYS_FILE_BYTES} from './important-days-transfer.js';
 import type {DayFileRecord} from './important-days-transfer.js';
 import type { ClipboardRevision, Filter, MenuPosition, NoteInput, TextMenuAction, TextMenuOptions, ImportantDayInput, DayExportResult, DayImportPreview, DayImportResult } from './shared.js';
 import { windowsClipboardRevision, writeWindowsClipboardImage } from './windows-image-clipboard.js';
@@ -29,7 +29,8 @@ protocol.registerSchemesAsPrivileged([{ scheme: 'app-asset', privileges: { stand
 let win: BrowserWindow | null = null, store: Store, busy = false, mayClose = false, backupWarning: string | null = null, lastBackup: string | null = null;
 // One export location and one staged import live in the main process only; the
 // renderer receives a file count, a preview summary and an opaque token.
-let lastDaysExport: string | null = null, pendingDaysImport: { token: string; rows: DayFileRecord[] } | null = null;
+let lastDaysExport: string | null = null, pendingDaysImport: { token: string; rows: DayFileRecord[]; createdAt: number } | null = null;
+const DAYS_IMPORT_TTL=30*60*1000;
 const lock = app.requestSingleInstanceLock(); if (!lock) {if(maintenance)app.exit(6);else app.quit();}
 app.on('second-instance', () => { win?.show(); if (win?.isMinimized()) win.restore(); win?.focus(); });
 function dateStamp() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
@@ -66,8 +67,8 @@ const methods: Record<string, (...args: any[]) => unknown> = {
     if(!entries.length)throw new Error('还没有重要日子可以导出');
     const picked=await dialog.showSaveDialog(win!,{title:'导出重要日子',defaultPath:`随手记重要日子-${fileStamp()}.json`,filters:[{name:'随手记重要日子',extensions:['json']}]});
     if(picked.canceled||!picked.filePath)return null;
-    const destination=path.resolve(picked.filePath),relative=path.relative(dataDir,destination);
-    if(relative==='notes.sqlite'||relative.startsWith(`attachments${path.sep}`)||relative.startsWith(`.运行缓存${path.sep}`))throw new Error('请选择一个单独的保存位置，避免覆盖正在使用的数据文件');
+    const destination=path.resolve(picked.filePath);
+    if(isLiveDataPath(dataDir,destination))throw new Error('请选择一个单独的保存位置，避免覆盖正在使用的数据文件');
     const reminders=new Map(entries.map(entry=>[entry.id,store.dayReminders(entry.id)]));
     await writeDaysFile(destination,serializeDaysFile(buildDaysFile(entries,reminders)));
     lastDaysExport=destination;
@@ -84,15 +85,18 @@ const methods: Record<string, (...args: any[]) => unknown> = {
     if(!info.isFile())throw new Error('请选择重要日子的文件');
     if(info.size>MAX_DAYS_FILE_BYTES)throw new Error('文件过大，不是随手记的重要日子导出文件');
     const parsed=parseDaysFile(await fsp.readFile(file,'utf8'));
+    // A staged file holds up to 20 MB of rows; only one may be pending at a time.
+    pendingDaysImport=null;
     const plan=planDayImport(store.listImportantDays(),parsed.rows),token=randomUUID();
-    pendingDaysImport={token,rows:parsed.rows};
+    pendingDaysImport={token,rows:parsed.rows,createdAt:Date.now()};
     return {token,fileName:path.basename(file),exportedAt:parsed.exportedAt,total:parsed.rows.length,
       added:plan.added.length,duplicates:plan.duplicates,conflicts:plan.conflicts.map(({local,incoming})=>dayImportConflict(local,incoming))};
   },
   applyImportImportantDays: async (token:string,conflict:'local'|'incoming'): Promise<DayImportResult> => {
     const pending=pendingDaysImport;
-    // Merge only: existing days are never deleted, and a staged file is used once.
+    // Merge only: existing days are never deleted, and a staged file expires.
     if(!pending||pending.token!==token)throw new Error('导入内容已失效，请重新选择文件');
+    if(Date.now()-pending.createdAt>DAYS_IMPORT_TTL)throw new Error('导入内容已过期，请重新选择文件');
     if(conflict!=='local'&&conflict!=='incoming')throw new Error('请选择冲突日子的处理方式');
     const result=await exclusive(async()=>store.importImportantDays(pending.rows,conflict));
     pendingDaysImport=null;

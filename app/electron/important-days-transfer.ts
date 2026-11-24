@@ -1,4 +1,5 @@
 import fsp from 'node:fs/promises';
+import path from 'node:path';
 import {validateImportantDay} from './important-days.js';
 import {lunarMonthName,lunarDayName} from './lunar-calendar.js';
 import type {DayImportConflict,DayImportDifference,ImportantDay,ImportantDayInput} from './shared.js';
@@ -54,6 +55,14 @@ export async function writeDaysFile(destination:string,text:string):Promise<void
   const temporary=`${destination}.partial`;
   try { await fsp.writeFile(temporary,text,'utf8'); await fsp.rename(temporary,destination); }
   catch(error){ await fsp.rm(temporary,{force:true}); throw new Error(`无法保存重要日子文件：${error instanceof Error?error.message:String(error)}`); }
+}
+
+// Never write an export over the files the running application keeps open.
+// Windows paths are case-insensitive, so a saved "NOTES.SQLITE" must be caught
+// just like "notes.sqlite".
+export function isLiveDataPath(dataDir:string,destination:string):boolean {
+  const relative=path.relative(dataDir,destination).toLowerCase();
+  return relative==='notes.sqlite'||relative.startsWith(`attachments${path.sep}`)||relative.startsWith(`.运行缓存${path.sep}`);
 }
 
 function parseReminders(raw:unknown,at:string):DayReminderRecord[] {
@@ -118,6 +127,9 @@ export function parseDaysFile(text:string):ParsedDaysFile {
   if(version>DAYS_VERSION)throw new Error('这个文件来自更新版本的随手记，请先更新软件再导入');
   if(!Array.isArray(file.days))throw new Error('文件结构不完整，找不到重要日子的列表');
   if(file.days.length>MAX_DAYS_ROWS)throw new Error(`文件里有 ${file.days.length} 条记录，超过一次导入 ${MAX_DAYS_ROWS} 条的上限`);
+  // The application never writes an empty export, so an empty list is not a
+  // useful file and must not reach the preview as "everything already exists".
+  if(!file.days.length)throw new Error('文件里没有可以导入的重要日子');
   return {exportedAt:stamp(file.exportedAt),rows:file.days.map((row,index)=>parseRow(row,index+1))};
 }
 
@@ -125,23 +137,32 @@ export function parseDaysFile(text:string):ParsedDaysFile {
 // otherwise the original date and name. Content equality decides duplicate
 // versus conflict, so nothing is ever overwritten silently.
 const signature=(day:ImportantDayInput)=>JSON.stringify([day.calendar,day.year,day.month,day.day,day.isLeapMonth,day.yearly,day.name]);
-const content=(day:ImportantDayInput)=>JSON.stringify([signature(day),day.reminderDays,day.note]);
+// Same key as JSON.stringify([signature,reminderDays,note]) without paying for
+// nested serialization on every comparison.
+const content=(day:ImportantDayInput)=>`${signature(day)}\u0000${day.reminderDays}\u0000${day.note}`;
 
 export function planDayImport(current:ImportantDay[],rows:DayFileRecord[]):DayImportPlan {
   const claimed=new Set<string>(),byId=new Map(current.map(day=>[day.id,day])),bySignature=new Map<string,ImportantDay[]>();
   for(const day of current){ const key=signature(day),bucket=bySignature.get(key); if(bucket)bucket.push(day); else bySignature.set(key,[day]); }
-  const added:DayFileRecord[]=[],conflicts:DayImportPlan['conflicts']=[];let duplicates=0;
+  const added:DayFileRecord[]=[],conflicts:DayImportPlan['conflicts']=[],addedContent=new Set<string>();let duplicates=0;
   for(const row of rows){
     let local=row.id?byId.get(row.id):undefined;
     if(local&&claimed.has(local.id))local=undefined;
-    if(!local)local=bySignature.get(signature(row))?.find(day=>!claimed.has(day.id));
+    if(!local){
+      // Two local days can share a date and a name. Prefer the one whose content
+      // is identical, so an exact match is reported as duplicate instead of
+      // pairing the row with a different record and overwriting it later.
+      const bucket=bySignature.get(signature(row)),key=content(row);
+      local=bucket?.find(day=>!claimed.has(day.id)&&content(day)===key)??bucket?.find(day=>!claimed.has(day.id));
+    }
     if(local){
       claimed.add(local.id);
       if(content(local)===content(row))duplicates++; else conflicts.push({local,incoming:row});
       continue;
     }
-    if(added.some(day=>content(day)===content(row))){duplicates++;continue;}
-    added.push(row);
+    const key=content(row);
+    if(addedContent.has(key)){duplicates++;continue;}
+    addedContent.add(key);added.push(row);
   }
   return {added,duplicates,conflicts};
 }
@@ -151,7 +172,12 @@ export function dayDateLabel(day:ImportantDayInput):string {
   return day.calendar==='lunar'?`农历${year}${lunarMonthName(day.month,day.isLeapMonth)}${lunarDayName(day.day)}`:`${year}${day.month}月${day.day}日`;
 }
 const reminderLabel=(days:number)=>days>0?`提前${days}天`:'当天提醒';
-const clip=(text:string)=>!text?'（空）':text.length>80?`${text.slice(0,80)}…`:text;
+// Two notes that differ only after the visible part must not look identical in
+// the conflict list: the user is choosing between them.
+const noteText=(text:string,other:string):string=>{
+  const shown=!text?'（空）':text.length>80?`${text.slice(0,80)}…`:text;
+  return text!==other&&text.slice(0,80)===other.slice(0,80)?`${shown}（差异在后文）`:shown;
+};
 
 export function dayImportConflict(local:ImportantDay,incoming:DayFileRecord):DayImportConflict {
   const differences:DayImportDifference[]=[];
@@ -160,6 +186,6 @@ export function dayImportConflict(local:ImportantDay,incoming:DayFileRecord):Day
   if(localDate!==incomingDate)differences.push({field:'date',label:'日期',local:localDate,incoming:incomingDate});
   if(local.yearly!==incoming.yearly)differences.push({field:'yearly',label:'每年重复',local:local.yearly?'每年重复':'不重复',incoming:incoming.yearly?'每年重复':'不重复'});
   if(local.reminderDays!==incoming.reminderDays)differences.push({field:'reminder',label:'提前提醒',local:reminderLabel(local.reminderDays),incoming:reminderLabel(incoming.reminderDays)});
-  if(local.note!==incoming.note)differences.push({field:'note',label:'备注',local:clip(local.note),incoming:clip(incoming.note)});
+  if(local.note!==incoming.note)differences.push({field:'note',label:'备注',local:noteText(local.note,incoming.note),incoming:noteText(incoming.note,local.note)});
   return {title:local.name,differences};
 }
