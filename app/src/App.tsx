@@ -1,12 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { EditorContent, useEditor } from '@tiptap/react';
-import { EditorState } from '@tiptap/pm/state';
+import { EditorState, NodeSelection } from '@tiptap/pm/state';
+import type { EditorView } from '@tiptap/pm/view';
 import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
 import Placeholder from '@tiptap/extension-placeholder';
 import { Plus, Search, FolderOpen, Trash2, Pin, Settings2, ChevronDown, MoreHorizontal, ArrowUpRight, ArrowLeft, ArrowRight, SlidersHorizontal, PanelLeft, PanelTopClose, PanelTopOpen, Paperclip, ImagePlus, Bold, Italic, Heading2, List, ListOrdered, Link, Undo2, Redo2, X, Check, CircleAlert, RotateCcw, Download, Upload, FileText, ArchiveRestore, HardDrive, LoaderCircle, BookOpen, Maximize2, Focus, CheckSquare, ClipboardType, Copy } from 'lucide-react';
 import appMark from '../assets/icon.svg';
-import type { AppInfo, Attachment, Filter, Note, NoteDetail, NoteSummary, Overview, RichNode,SortOrder,TextMenuAction } from '../electron/shared';
+import type { AppInfo, Attachment, Filter, MenuPosition, Note, NoteDetail, NoteSummary, Overview, RichNode,SortOrder,TextMenuAction } from '../electron/shared';
 import {usePanels,Splitter,LibraryHeightSplitter,LIBRARY_HEADER,rangeSelection} from './layout';
 import {insertPlainText,notePlainText,plainText} from './plain-text';
 import {Home} from './Home';
@@ -21,7 +22,39 @@ import {InstallWelcome} from './InstallWelcome';
 
 const LocalImage = Image.extend({
   addAttributes() { return { ...this.parent?.(), assetId: { default: null }, width: { default: 560, renderHTML: attrs => ({ width: attrs.width, style: `max-width:100%;width:${attrs.width}px;height:auto` }) } }; }
-});
+}).configure({ HTMLAttributes: { title: '单击选中 · 双击放大 · 右键复制' } });
+
+function imageAt(view: EditorView, pos: number) {
+  const node = view.state.doc.nodeAt(pos);
+  const element = view.nodeDOM(pos);
+  if (node?.type !== view.state.schema.nodes.image || !(element instanceof HTMLImageElement)) return null;
+  const id = node.attrs.assetId;
+  return typeof id === 'string' ? { id, element } : null;
+}
+
+function selectedImage(view: EditorView) {
+  const { selection, schema } = view.state;
+  if (!(selection instanceof NodeSelection) || selection.node.type !== schema.nodes.image) return null;
+  return imageAt(view, selection.from);
+}
+
+async function pngForClipboard(bytes: Uint8Array) {
+  const image = await createImageBitmap(new Blob([new Uint8Array(bytes)]));
+  const canvas = document.createElement('canvas');
+  try {
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('无法读取图片');
+    context.drawImage(image, 0, 0);
+    const png = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
+    if (!png) throw new Error('无法转换图片');
+    return new Uint8Array(await png.arrayBuffer());
+  } finally {
+    image.close();
+    canvas.width = canvas.height = 0;
+  }
+}
 const formatDate = (date: string) => new Date(date).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
 const fullDate = (date: string) => new Date(date).toLocaleString('zh-CN', { hour12: false });
 const titleFor = noteTitle;
@@ -49,6 +82,8 @@ export default function App() {
   const [clipboardBusy,setClipboardBusy] = useState(false), [textMenuOpen,setTextMenuOpen] = useState(false);
   const textActionRef = useRef<(action: TextMenuAction) => void>(() => {});
   const textMenuRef = useRef<(mode:'context'|'toolbar',x:number,y:number) => void>(() => {});
+  const copyImageRef = useRef<(id: string, position?: MenuPosition) => void>(() => {});
+  const copyRequest = useRef(0);
   const {preferences:layout,setPreferences:setLayout,sizes,style:layoutStyle}=usePanels();
   const focusEditor=useRef(false);
   const libraryHeading=useRef<HTMLDivElement>(null);
@@ -76,15 +111,50 @@ export default function App() {
       scrollThreshold: { top: 30, bottom: 24, left: 10, right: 10 },
       scrollMargin: { top: 30, bottom: 24, left: 10, right: 10 },
       handleDOMEvents: {
-        keydown: (_view,event) => {
-          if (event.isComposing || event.altKey || !(event.ctrlKey || event.metaKey) || !event.shiftKey) return false;
+        pointerdown: (_view,event) => {
+          if (event.button !== 2 || !(event.target instanceof HTMLImageElement)) return false;
+          event.preventDefault(); return true;
+        },
+        keydown: (view,event) => {
+          if (event.isComposing || event.altKey) return false;
           const key = event.key.toLowerCase();
+          const image = selectedImage(view);
+          if (image && key === 'enter' && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+            event.preventDefault(); setZoom(image.element.src); return true;
+          }
+          if (!(event.ctrlKey || event.metaKey)) return false;
+          if (key === 'c' && !event.shiftKey && image) {
+            event.preventDefault(); event.stopPropagation();
+            if (!event.repeat) copyImageRef.current(image.id);
+            return true;
+          }
+          if (!event.shiftKey) return false;
           if (key !== 'c' && key !== 'v') return false;
           event.preventDefault(); event.stopPropagation();
           textActionRef.current(key === 'c' ? 'copyPlain' : 'pastePlain'); return true;
         },
-        contextmenu: (_view,event) => {
-          event.preventDefault(); textMenuRef.current('context',event.clientX,event.clientY); return true;
+        copy: (view,event) => {
+          const image = selectedImage(view);
+          if (!image) return false;
+          event.preventDefault(); copyImageRef.current(image.id); return true;
+        },
+        mousedown: (_view,event) => {
+          if (event.button !== 2 || !(event.target instanceof HTMLImageElement)) return false;
+          event.preventDefault(); return true;
+        },
+        contextmenu: (view,event) => {
+          event.preventDefault();
+          const image = event.target instanceof HTMLImageElement ? imageAt(view, view.posAtDOM(event.target, 0)) :
+            event.detail === 0 && event.clientX === 0 && event.clientY === 0 ? selectedImage(view) : null;
+          if (image) {
+            const bounds = image.element.getBoundingClientRect();
+            copyImageRef.current(image.id, { x: event.clientX || bounds.left, y: event.clientY || bounds.top });
+          } else textMenuRef.current('context',event.clientX,event.clientY);
+          return true;
+        },
+        dblclick: (_view,event) => {
+          if (!(event.target instanceof HTMLImageElement)) return false;
+          event.preventDefault(); setZoom(event.target.src); return true;
         }
       },
       handlePaste: (_view, event) => {
@@ -101,7 +171,12 @@ export default function App() {
       },
       handleClick: (_view, _pos, event) => {
         const target = event.target as HTMLElement;
-        if (target.tagName === 'IMG') { editor?.commands.setNodeSelection(_view.posAtDOM(target, 0)); setZoom(target.getAttribute('src')); return true; }
+        if (target instanceof HTMLImageElement && !event.shiftKey) {
+          const pos = _view.posAtDOM(target, 0);
+          if (imageAt(_view, pos)?.element !== target) return false;
+          _view.dispatch(_view.state.tr.setSelection(NodeSelection.create(_view.state.doc, pos)));
+          _view.focus(); return true;
+        }
         const a = target.closest('a'); if (a) { event.preventDefault(); void api.openLink(a.href).catch(report); return true; } return false;
       }
     },
@@ -110,6 +185,31 @@ export default function App() {
     onTransaction: () => forceToolbar(n => n + 1)
   });
   useEffect(() => { editor?.setEditable(!readOnly, false); }, [editor, readOnly]);
+  useEffect(() => {
+    // A later native copy takes precedence over an image still being encoded.
+    const invalidate = () => { copyRequest.current++; };
+    document.addEventListener('copy', invalidate, true);
+    return () => document.removeEventListener('copy', invalidate, true);
+  }, []);
+  async function copyImage(id: string, position?: MenuPosition) {
+    if (blocked || !current.current) return;
+    let request: number | undefined;
+    try {
+      if (position && !await api.showImageMenu(position)) return;
+      request = ++copyRequest.current;
+      const bytes = await api.readImageForClipboard(id);
+      if (request !== copyRequest.current) return;
+      const png = await pngForClipboard(bytes).catch(() => {
+        throw new Error('无法复制图片，请确认原图仍可打开');
+      });
+      if (request !== copyRequest.current) return;
+      await api.writeClipboardImage(png);
+      if (request === copyRequest.current) notify('图片已复制');
+    } catch (e) {
+      if (request === undefined || request === copyRequest.current) report(e);
+    }
+  }
+  copyImageRef.current = (id, position) => { void copyImage(id, position); };
   function textTarget() {
     if (!editor || !current.current) return null;
     return { id:current.current.note.id, title:current.current.note.title, doc:editor.state.doc, selection:editor.state.selection };
@@ -118,6 +218,7 @@ export default function App() {
     if (!editor || !target || blocked || clipboardBusy) return;
     if (current.current?.note.id !== target.id) return;
     if (action === 'pastePlain' && readOnly) return;
+    if (action !== 'pastePlain') copyRequest.current++;
     setClipboardBusy(true);
     try {
       if (action === 'pastePlain') {
@@ -423,7 +524,7 @@ export default function App() {
           {note.deletedAt&&<div className="trash-banner"><Trash2 size={14}/>回收站中的记录只供查看，恢复后可以继续编辑。</div>}
           <div className="editor-scroll"><div className="document-desk"><article className="writing-area">
             <header className="page-heading"><div className="record-type">{note.deletedAt?'回收站 / 只读':'随手记录'}</div><input className="title-input" aria-label="记录标题" placeholder="给这条记录起个名字" maxLength={300} value={note.title} disabled={readOnly} onChange={e=>markChanged({title:e.target.value})}/><div className="record-tags">{note.tags.map(t=><span className="tag-chip" key={t}># {t}{!readOnly&&<button aria-label={`移除标签 ${t}`} onClick={()=>markChanged({tags:note.tags.filter(x=>x!==t)})}><X size={11}/></button>}</span>)}{!readOnly&&<div className="tag-input-wrap"><Plus size={12}/><input aria-label="添加标签" placeholder="添加标签" value={tagInput} maxLength={31} onChange={e=>setTagInput(e.target.value)} onBlur={commitTag} onKeyDown={e=>{if(e.key==='Enter'||e.key===','){e.preventDefault();commitTag();}}}/></div>}</div></header>
-            {editor?.isActive('image')&&!readOnly&&<div className="image-controls"><span>图片宽度</span>{[280,560,800].map(w=><button key={w} onClick={()=>editor.chain().focus().updateAttributes('image',{width:w}).run()}>{w===280?'小':w===560?'中':'大'}</button>)}<span>点击图片查看原图</span></div>}
+            {editor?.isActive('image')&&!readOnly&&<div className="image-controls"><span>图片宽度</span>{[280,560,800].map(w=><button key={w} onClick={()=>editor.chain().focus().updateAttributes('image',{width:w}).run()}>{w===280?'小':w===560?'中':'大'}</button>)}<span>Ctrl+C 复制 · 双击放大</span></div>}
             <EditorContent editor={editor}/>
             <section className="attachments-section"><div className="section-label"><h2>随附文件 <span>{files.length||''}</span></h2>{!readOnly&&<button onClick={()=>void pickFiles()}><Plus size={14}/>添加附件</button>}</div>{files.length?<div className="attachment-grid">{files.map(a=><button className="attachment-card" key={a.id} title={`打开 ${a.name}`} onClick={()=>void api.openAttachment(a.id).catch(report)}><FileText size={22}/><span><strong>{a.name}</strong><small>{sizeFor(a.size)} · 已保存副本</small></span><ArrowUpRight size={16}/></button>)}</div>:<p className="attachment-hint">拖入文件或点击添加，副本会随这条记录一起保存。</p>}</section>
             <div className="page-end"><span>—</span><small>{note.plainText.replace(/\s/g,'').length} 字</small></div>

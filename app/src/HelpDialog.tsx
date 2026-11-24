@@ -54,7 +54,7 @@ export function HelpDialog({info, onClose, onOpenDataDir}: {
       </div>
       <section className="usage-help-topics" aria-label="按需了解">
         <details name="usage-help-topic"><summary>图片和文件怎么放进来？<ChevronDown size={16}/></summary>
-          <div className="usage-help-answer"><p>截图直接按 <kbd>Ctrl V</kbd> 粘贴。图片和文件可以拖进记录，也可以点“图片 / 文件”添加。</p><p>添加后会保存一份独立副本，原文件移走也不影响。点图片可放大，点附件可打开。</p></div>
+          <div className="usage-help-answer"><p>截图直接按 <kbd>Ctrl V</kbd> 粘贴。图片和文件可以拖进记录，也可以点“图片 / 文件”添加。</p><p>右键图片选“复制图片”，也可以单击选中后按 <kbd>Ctrl C</kbd>，再粘贴到其他软件。双击图片可放大，点附件可打开。</p><p>添加后会保存独立副本，原文件移走也不影响。</p></div>
         </details>
         <details name="usage-help-topic"><summary>复制来的文字，怎么去掉格式？<ChevronDown size={16}/></summary>
           <div className="usage-help-answer"><p>按 <kbd>Ctrl Shift V</kbd> 粘贴为纯文本，保留文字和换行，去掉来源的字体、颜色等格式。</p><p>想复制干净的文字，选中正文后按 <kbd>Ctrl Shift C</kbd>。工具栏“纯文本”里也能找到这两个操作。</p></div>
