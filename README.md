@@ -4,7 +4,7 @@
 
 一款安静、易用的 Windows 本地记录软件。把突然冒出的想法、截图和文件收在一起，也替你记着家人的生日和纪念日。
 
-**[下载 Windows 安装版 · 1.8.3](https://github.com/zhuliuqingfeng-blip/suishouji/releases/download/v1.8.3/suishouji-1.8.3-setup-x64.exe)** · [发布说明](https://github.com/zhuliuqingfeng-blip/suishouji/releases/latest) · [使用说明](docs/使用说明.txt) · [反馈问题](https://github.com/zhuliuqingfeng-blip/suishouji/issues)
+**[下载 Windows 安装版 · 1.9.0](https://github.com/zhuliuqingfeng-blip/suishouji/releases/download/v1.9.0/suishouji-1.9.0-setup-x64.exe)** · [发布说明](https://github.com/zhuliuqingfeng-blip/suishouji/releases/latest) · [使用说明](docs/使用说明.txt) · [反馈问题](https://github.com/zhuliuqingfeng-blip/suishouji/issues)
 
 Windows 64 位 · 支持覆盖升级 · 离线可用 · 数据保存在本地
 
@@ -48,7 +48,7 @@ Windows 64 位 · 支持覆盖升级 · 离线可用 · 数据保存在本地
 
 ## 开始使用
 
-1. **[下载 1.8.3 安装包](https://github.com/zhuliuqingfeng-blip/suishouji/releases/download/v1.8.3/suishouji-1.8.3-setup-x64.exe)**，双击运行。
+1. **[下载 1.9.0 安装包](https://github.com/zhuliuqingfeng-blip/suishouji/releases/download/v1.9.0/suishouji-1.9.0-setup-x64.exe)**，双击运行。
 2. 首次安装可以选择存放位置。例如选择 `E:\soft`，会自动创建 `E:\soft\随手记`，安装前显示最终路径，无需自己新建文件夹。
 3. 打开软件，点击“写点什么”，记下第一件想留下的事。无需配置 Node.js 或数据库。
 4. 以后更新时，直接运行新版安装包。沿用已有安装位置和个人资料，无需先卸载、导出或手工搬动数据。
@@ -58,7 +58,7 @@ Windows 64 位 · 支持覆盖升级 · 离线可用 · 数据保存在本地
 <details>
 <summary>免安装版与其他下载</summary>
 
-本次 1.8.3 发布提供正式安装版，推荐日常使用。较早的免安装版可在 [历史版本](https://github.com/zhuliuqingfeng-blip/suishouji/releases) 中下载：完整解压 Windows x64 的 `.zip`，双击 `随手记.exe`，资料保存在软件旁的“我的数据”中。
+本次 1.9.0 发布提供正式安装版，推荐日常使用。较早的免安装版可在 [历史版本](https://github.com/zhuliuqingfeng-blip/suishouji/releases) 中下载：完整解压 Windows x64 的 `.zip`，双击 `随手记.exe`，资料保存在软件旁的“我的数据”中。
 
 GitHub 自动生成的 **Source code** 是源码；直接使用软件请选择带 `setup-x64.exe` 的安装包。
 
