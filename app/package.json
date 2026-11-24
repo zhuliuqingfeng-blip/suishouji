@@ -49,6 +49,7 @@
       "package.json"
     ],
     "asar": true,
+    "asarUnpack": ["**/@koromix/koffi-*/**/*.node"],
     "npmRebuild": false,
     "win": {
       "target": "dir",
@@ -61,6 +62,7 @@
     }
   },
   "dependencies": {
+    "koffi": "3.3.8",
     "lunar-typescript": "1.8.6",
     "yauzl": "^3.4.0",
     "yazl": "^3.3.1"

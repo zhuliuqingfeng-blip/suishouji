@@ -22,6 +22,7 @@ export interface DayReminder { key: string; dayId: string; occurrence: string; s
 export type Result<T> = { ok: true; data: T } | { ok: false; error: string };
 export type TextMenuAction = 'copyPlain' | 'pastePlain' | 'copyAllPlain';
 export interface MenuPosition { x: number; y: number }
+export interface ClipboardRevision { sequence: number; owner: bigint | null }
 export interface TextMenuOptions extends MenuPosition { mode: 'context' | 'toolbar'; hasSelection: boolean; hasText: boolean; editable: boolean }
 export interface NotesAPI {
   listImportantDays(): Promise<ImportantDay[]>; saveImportantDay(input: ImportantDayInput): Promise<ImportantDay>;
@@ -41,8 +42,8 @@ export interface NotesAPI {
   info(): Promise<AppInfo>; openDataDir(): Promise<void>;
   importLegacy(): Promise<boolean>; finishInstallSetup(): Promise<void>;
   readClipboardText(): Promise<string>; writeClipboardText(text: string): Promise<void>;
-  readImageForClipboard(id: string): Promise<Uint8Array>;
-  writeClipboardImage(png: Uint8Array): Promise<void>;
+  readImageForClipboard(id: string): Promise<{bytes: Uint8Array; revision: ClipboardRevision | null}>;
+  writeClipboardImage(png: Uint8Array, revision: ClipboardRevision | null): Promise<boolean>;
   showImageMenu(position: MenuPosition): Promise<true | null>;
   showTextMenu(options: TextMenuOptions): Promise<TextMenuAction | null>;
   readyToClose(): Promise<void>; onCloseRequested(callback: () => void): () => void;

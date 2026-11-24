@@ -63,7 +63,7 @@ async function checkClipboardImage({ ext, size }) {
   assert.fail('系统剪贴板没有图片：' + await page.locator('.toast').allTextContents());
 }
 
-async function checkCutDuringImageRead(image, source, field, expected, isTitle) {
+async function withDelayedImageRead(image, source, action) {
   await instance.evaluate((_electron, file) => {
     const fs = process.getBuiltinModule('node:fs/promises');
     const readFile = fs.readFile;
@@ -85,6 +85,14 @@ async function checkCutDuringImageRead(image, source, field, expected, isTitle) 
       await new Promise(resolve => setTimeout(resolve, 50));
     }
     assert.ok(await instance.evaluate(() => globalThis.__cutRace.started), '图片复制应该已开始读原图');
+    await action(() => instance.evaluate(() => globalThis.__cutRace.release()));
+  } finally {
+    await instance.evaluate(() => globalThis.__cutRace.restore());
+  }
+}
+
+async function checkCutDuringImageRead(image, source, field, expected, isTitle) {
+  await withDelayedImageRead(image, source, async release => {
     if (isTitle) {
       await field.fill(expected);
       await field.selectText();
@@ -98,7 +106,7 @@ async function checkCutDuringImageRead(image, source, field, expected, isTitle) 
     }
     await page.keyboard.press('Control+x');
     assert.equal(await instance.evaluate(({ clipboard }) => clipboard.readText()), expected);
-    await instance.evaluate(() => globalThis.__cutRace.release());
+    await release();
     // Allow the resumed image request time to reach the clipboard if it was not canceled.
     await page.waitForTimeout(500);
     const afterRead = await clipboardInfo();
@@ -106,9 +114,28 @@ async function checkCutDuringImageRead(image, source, field, expected, isTitle) 
     assert.equal(afterRead.size, null);
     await page.keyboard.press('Control+v');
     assert.equal(isTitle ? await field.inputValue() : await field.innerText(), expected);
-  } finally {
-    await instance.evaluate(() => globalThis.__cutRace.restore());
-  }
+  });
+}
+
+async function checkExternalClipboardDuringImageRead(image, source) {
+  const expected = '其他 Windows 应用刚写入的文字';
+  await withDelayedImageRead(image, source, async release => {
+    await execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-STA', '-Command', `
+      $ErrorActionPreference='Stop'
+      Add-Type -AssemblyName System.Windows.Forms
+      [Windows.Forms.Clipboard]::SetText($env:MEMO_TEST_TEXT)
+    `], { env: { ...process.env, MEMO_TEST_TEXT: expected }, windowsHide: true });
+    assert.equal((await clipboardInfo()).text, expected);
+    await release();
+    await page.getByText('剪贴板已有更新，已取消图片复制', { exact: true }).waitFor({ timeout: 5000 });
+    const afterRead = await clipboardInfo();
+    assert.equal(afterRead.text, expected);
+    assert.equal(afterRead.size, null);
+    const title = page.getByLabel('记录标题');
+    await title.fill('');
+    await title.press('Control+v');
+    assert.equal(await title.inputValue(), expected);
+  });
 }
 
 async function checkNativePaste() {
@@ -267,16 +294,19 @@ try {
     assert.deepEqual(await fs.readFile(path.join(data, asset.relativePath)), fileBytes[index]);
   console.log('双击预览与普通富文本复制正常，保存的记录和附件字节保持一致');
 
-  await instance.evaluate(({ clipboard }) => {
-    globalThis.__imageTestWrite = clipboard.write;
-    clipboard.write = async () => { throw new Error('Simulated clipboard failure'); };
+  await instance.evaluate(({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows()[0];
+    globalThis.__imageTestWindowHandle = window.getNativeWindowHandle;
+    window.getNativeWindowHandle = () => { throw new Error('Simulated unavailable clipboard owner window'); };
   });
   try {
     await images.first().click({ button: 'right' });
     await page.getByRole('alert').filter({ hasText: '无法写入系统剪贴板' }).waitFor();
     assert.equal((await clipboardInfo()).text, '普通文字依然可以复制');
   } finally {
-    await instance.evaluate(({ clipboard }) => { clipboard.write = globalThis.__imageTestWrite; });
+    await instance.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0].getNativeWindowHandle = globalThis.__imageTestWindowHandle;
+    });
   }
   const missing = original.attachments.find(asset => asset.name === 'copy.gif');
   await fs.unlink(path.join(data, missing.relativePath));
@@ -290,6 +320,8 @@ try {
   await checkCutDuringImageRead(images.first(), source, page.getByLabel('记录标题'), '等待期间剪切的标题', true);
   await checkCutDuringImageRead(images.first(), source, text, '普通文字依然可以复制', false);
   console.log('图片原件读取延迟时，标题和正文剪切的文字仍可粘贴');
+  await checkExternalClipboardDuringImageRead(images.first(), source);
+  console.log('独立 Windows 进程更新剪贴板时，旧图片复制取消，外部文字仍可粘贴');
 } finally {
   if (instance) {
     try { await restoreClipboard(); }

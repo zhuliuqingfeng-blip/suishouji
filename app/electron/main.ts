@@ -5,7 +5,8 @@ import fsp from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Store } from './store.js';
 import { createBackup, validateBackup, applyRestore, recoverInterruptedRestore, exportHtml } from './archive.js';
-import type { Filter, MenuPosition, NoteInput, TextMenuAction, TextMenuOptions, ImportantDayInput } from './shared.js';
+import type { ClipboardRevision, Filter, MenuPosition, NoteInput, TextMenuAction, TextMenuOptions, ImportantDayInput } from './shared.js';
+import { windowsClipboardRevision, writeWindowsClipboardImage } from './windows-image-clipboard.js';
 import { fitWindow,readWindowState,writeWindowState } from './window-state.js';
 import {storageLocation} from './storage-location.js';
 import {emptyData,legacyRoot,recoverLegacyImport,pendingLegacyImport,requestLegacyImport,importLegacyData,clearLegacyRequest,importWorkDir} from './legacy-import.js';
@@ -135,17 +136,28 @@ const methods: Record<string, (...args: any[]) => unknown> = {
     return clipboard.writeText(text);
   },
   readImageForClipboard: async (id: string) => {
+    let revision: ClipboardRevision | null = null;
+    try { if (process.platform === 'win32') revision = windowsClipboardRevision(); }
+    catch { throw new Error('无法读取系统剪贴板，请重试'); }
     try {
       if (typeof id !== 'string') throw new Error();
       const asset = store.attachment(id);
       if (asset.kind !== 'image') throw new Error();
-      return await fsp.readFile(store.assetPath(asset));
+      return { bytes: await fsp.readFile(store.assetPath(asset)), revision };
     } catch { throw new Error('无法读取原图，可尝试从备份恢复'); }
   },
-  writeClipboardImage: async (png: Uint8Array) => {
+  writeClipboardImage: async (png: Uint8Array, revision: ClipboardRevision | null) => {
     if (!(png instanceof Uint8Array) || !png.byteLength) throw new Error('图片无法复制，可尝试从备份恢复原图');
-    const image = new Blob([new Uint8Array(png)], { type: 'image/png' });
-    try { await clipboard.write([new ClipboardItem({ 'image/png': image })]); }
+    try {
+      if (process.platform === 'win32') {
+        if (!win || !revision || !Number.isInteger(revision.sequence) || (revision.owner !== null && typeof revision.owner !== 'bigint'))
+          throw new Error('Missing clipboard revision or window');
+        return writeWindowsClipboardImage(win.getNativeWindowHandle(), revision, Buffer.from(png.buffer, png.byteOffset, png.byteLength));
+      }
+      const image = new Blob([new Uint8Array(png)], { type: 'image/png' });
+      await clipboard.write([new ClipboardItem({ 'image/png': image })]);
+      return true;
+    }
     catch { throw new Error('无法写入系统剪贴板，请重试'); }
   },
   showImageMenu: (position: MenuPosition) => popupMenu<true>(position, choose => [

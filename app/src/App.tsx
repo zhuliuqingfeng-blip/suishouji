@@ -201,14 +201,14 @@ export default function App() {
     try {
       if (position && !await api.showImageMenu(position)) return;
       request = ++copyRequest.current;
-      const bytes = await api.readImageForClipboard(id);
+      const { bytes, revision } = await api.readImageForClipboard(id);
       if (request !== copyRequest.current) return;
       const png = await pngForClipboard(bytes).catch(() => {
         throw new Error('无法复制图片，请确认原图仍可打开');
       });
       if (request !== copyRequest.current) return;
-      await api.writeClipboardImage(png);
-      if (request === copyRequest.current) notify('图片已复制');
+      const written = await api.writeClipboardImage(png, revision);
+      if (request === copyRequest.current) notify(written ? '图片已复制' : '剪贴板已有更新，已取消图片复制');
     } catch (e) {
       if (request === undefined || request === copyRequest.current) report(e);
     }
