@@ -8,6 +8,7 @@ import path from 'node:path';
 import { appRoot, testRoot } from './paths.mjs';
 
 const execute = promisify(execFile);
+await fs.mkdir(testRoot, { recursive: true });
 const root = await fs.mkdtemp(path.join(testRoot, 'image-copy-'));
 const data = path.join(root, 'data');
 const exe = process.env.NOTES_PACKAGED_EXE;
@@ -19,6 +20,21 @@ async function start() {
     args: exe ? [] : ['.'], env: { ...process.env, NOTES_TEST_MODE: '1', NOTES_DATA_DIR: data } });
   page = await instance.firstWindow();
   await page.getByRole('button', { name: '数据与设置', exact: true }).waitFor();
+  savedClipboard = await instance.evaluate(async ({ clipboard }) =>
+    Promise.all((await clipboard.read()).map(async item => Object.fromEntries(await Promise.all(item.types.map(async type => {
+      const value = await item.getType(type);
+      return [type, value instanceof Blob ? { blob: Array.from(new Uint8Array(await value.arrayBuffer())), mime: value.type } : { bookmark: value }];
+    }))))));
+}
+
+async function restoreClipboard() {
+  if (savedClipboard === undefined) return;
+  await instance.evaluate(async ({ clipboard, ClipboardItem }, items) => {
+    if (!items.length) { clipboard.clear(); return; }
+    await clipboard.write(items.map(item => new ClipboardItem(Object.fromEntries(Object.entries(item).map(([type, value]) =>
+      [type, value.blob ? new Blob([new Uint8Array(value.blob)], { type: value.mime }) : value.bookmark])))));
+  }, savedClipboard);
+  savedClipboard = undefined;
 }
 
 async function clipboardInfo() {
@@ -82,11 +98,6 @@ async function checkExternalAppPaste() {
 try {
   await fs.mkdir(data, { recursive: true });
   await start();
-  savedClipboard = await instance.evaluate(async ({ clipboard }) =>
-    Promise.all((await clipboard.read()).map(async item => Object.fromEntries(await Promise.all(item.types.map(async type => {
-      const value = await item.getType(type);
-      return [type, value instanceof Blob ? { blob: Array.from(new Uint8Array(await value.arrayBuffer())), mime: value.type } : { bookmark: value }];
-    }))))));
   const pixels = await page.evaluate(({ width, height }) => {
     const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
     const context = canvas.getContext('2d'); context.fillStyle = '#df1231'; context.fillRect(0, 0, width, height);
@@ -136,6 +147,8 @@ try {
     await api.save({ ...note, document });
     return api.get(id);
   }, testNote);
+  // Restore before closing so a failed restart cannot leave the test image on the clipboard.
+  await restoreClipboard();
   await instance.close(); instance = null;
   await start();
   await page.getByRole('button', { name: '继续上次记录', exact: true }).click();
@@ -158,6 +171,9 @@ try {
       options.callback?.();
     };
   });
+  const rightClickMarker = '等待右键复制图片';
+  await instance.evaluate(({ clipboard }, marker) => clipboard.writeText(marker), rightClickMarker);
+  assert.deepEqual(await clipboardInfo(), { size: null, text: rightClickMarker, html: false });
   await images.first().click({ button: 'right' });
   await checkClipboardImage();
   assert.deepEqual(await instance.evaluate(() => globalThis.__imageMenuLabels), ['复制图片']);
@@ -211,12 +227,7 @@ try {
   console.log('原图缺失或剪贴板写入失败会给出提示，之前的剪贴板内容仍可用');
 } finally {
   if (instance) {
-    try {
-      if (savedClipboard) await instance.evaluate(async ({ clipboard, ClipboardItem }, items) => {
-        if (!items.length) { clipboard.clear(); return; }
-        await clipboard.write(items.map(item => new ClipboardItem(Object.fromEntries(Object.entries(item).map(([type, value]) =>
-          [type, value.blob ? new Blob([new Uint8Array(value.blob)], { type: value.mime }) : value.bookmark])))));
-      }, savedClipboard);
-    } finally { await instance.close(); }
+    try { await restoreClipboard(); }
+    finally { await instance.close(); }
   }
 }
