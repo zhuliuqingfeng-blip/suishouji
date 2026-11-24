@@ -164,14 +164,13 @@ async function checkInterleavedClipboardWrite(image) {
   await testClipboard.writeText(marker);
   assert.equal((await clipboardInfo()).text, marker);
   await armImageCopy();
-  await withExternalClipboardWriter(newer, async pid => {
+  await withExternalClipboardWriter(newer, async () => {
     await image.click({ button: 'right' });
     await page.getByText('剪贴板已有更新，已取消图片复制', { exact: true }).waitFor({ timeout: 5000 });
     assert.deepEqual(await clipboardInfo(), { size: null, text: newer, html: false });
-    assert.ok(await testClipboard.rememberWrite(pid));
     // Return ownership to the harness while the external test writer is still alive.
     await testClipboard.writeText('跨进程写入竞态已检查');
-  });
+  }, { restoreOnSuccess: false });
 }
 
 async function checkUnexpectedWriteCleanup(image) {
@@ -188,50 +187,67 @@ async function checkUnexpectedWriteCleanup(image) {
 
 async function checkExternalClipboardDuringImageRead(image, source) {
   const expected = '其他 Windows 应用刚写入的文字';
-  await withDelayedImageRead(image, source, release => withExternalClipboardWriter(expected, async pid => {
-    try {
-      assert.ok(await testClipboard.rememberWrite(pid), '应能确认外部测试进程拥有剪贴板');
-      assert.equal((await clipboardInfo()).text, expected);
-      await release();
-      await page.getByText('剪贴板已有更新，已取消图片复制', { exact: true }).waitFor({ timeout: 5000 });
-      const afterRead = await clipboardInfo();
-      assert.equal(afterRead.text, expected);
-      assert.equal(afterRead.size, null);
-      const title = page.getByLabel('记录标题');
-      await title.fill('');
-      await title.press('Control+v');
-      assert.equal(await title.inputValue(), expected);
-      await checkCleanupPreservesExternalWrite();
-    } finally {
-      await testClipboard.restore(appPid);
-    }
+  await withDelayedImageRead(image, source, release => withExternalClipboardWriter(expected, async () => {
+    assert.equal((await clipboardInfo()).text, expected);
+    await release();
+    await page.getByText('剪贴板已有更新，已取消图片复制', { exact: true }).waitFor({ timeout: 5000 });
+    const afterRead = await clipboardInfo();
+    assert.equal(afterRead.text, expected);
+    assert.equal(afterRead.size, null);
+    const title = page.getByLabel('记录标题');
+    await title.fill('');
+    await title.press('Control+v');
+    assert.equal(await title.inputValue(), expected);
+    await checkCleanupPreservesExternalWrite();
   }));
 }
 
-async function withExternalClipboardWriter(text, action) {
+async function withExternalClipboardWriter(text, action, { restoreOnSuccess = true } = {}) {
   const helper = fileURLToPath(new URL('./image-copy-test-clipboard.mjs', import.meta.url));
   const writer = spawn(process.execPath, [helper, '--fixture-writer', text], { windowsHide: true, stdio: ['pipe', 'pipe', 'inherit'] });
   const closed = once(writer, 'close');
+  let adopted = false;
+  let completed = false;
   try {
     await Promise.race([
       once(writer.stdout, 'data', { signal: AbortSignal.timeout(10000) }),
       closed.then(([code]) => { throw new Error(`外部剪贴板进程提前退出 (${code})`); }),
     ]);
-    await action(writer.pid);
-  } finally { writer.stdin.end(); await closed; }
+    adopted = await testClipboard.rememberWrite(writer.pid);
+    assert.ok(adopted, '应能确认外部测试进程拥有剪贴板');
+    await action();
+    completed = true;
+  } finally {
+    try {
+      if (!completed || restoreOnSuccess) {
+        if (!adopted && writer.pid) adopted = await testClipboard.rememberWrite(writer.pid);
+        await testClipboard.restore(appPid);
+      }
+    } finally {
+      writer.stdin.end(adopted ? 'adopted\n' : undefined);
+      await closed;
+    }
+  }
 }
 
 async function checkCleanupPreservesExternalWrite() {
   const newer = '退出前另一进程又写入了剪贴板';
-  await withExternalClipboardWriter(newer, async pid => {
-    try {
-      assert.equal(await testClipboard.restore(appPid), false, '清理必须跳过另一进程写入的新内容');
-      assert.equal((await clipboardInfo()).text, newer);
-    } finally {
-      // This particular foreign write was a fixture that we deliberately triggered.
-      if (await testClipboard.rememberWrite(pid)) assert.equal(await testClipboard.restore(), true);
-    }
+  const earlierRevision = testClipboard.expectedRevision();
+  await withExternalClipboardWriter(newer, async () => {
+    assert.equal(await testClipboard.restore(appPid, earlierRevision), false, '清理必须跳过另一进程写入的新内容');
+    assert.equal((await clipboardInfo()).text, newer);
   });
+}
+
+async function checkExternalWriterTimeoutCleanup() {
+  await testClipboard.snapshot();
+  const before = await clipboardInfo();
+  const marker = '等待验收提示超时的测试文字';
+  await assert.rejects(withExternalClipboardWriter(marker, async () => {
+    assert.equal((await clipboardInfo()).text, marker);
+    await page.getByText('故意不出现的剪贴板验收提示', { exact: true }).waitFor({ timeout: 100 });
+  }, { restoreOnSuccess: false }), { name: 'TimeoutError' });
+  assert.deepEqual(await clipboardInfo(), before, '辅助进程写入后的验收超时应恢复原剪贴板');
 }
 
 async function checkNativePaste() {
@@ -490,6 +506,8 @@ try {
   console.log('退出清理保留更晚的跨进程写入，随后仅恢复已确认属于测试的夹具');
   await checkUnexpectedWriteCleanup(images.first());
   console.log('验收失败路径能识别并清理测试应用意外写入的图片');
+  await checkExternalWriterTimeoutCleanup();
+  console.log('外部进程写入后等待提示超时，原剪贴板在辅助进程退出前已恢复');
 } finally {
   try { await testClipboard.restore(appPid); }
   finally {

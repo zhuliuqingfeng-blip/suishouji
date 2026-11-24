@@ -1,5 +1,4 @@
 import koffi from 'koffi';
-import { once } from 'node:events';
 import { pathToFileURL } from 'node:url';
 
 // These formats store their payload in movable global memory, unlike GDI handles.
@@ -100,13 +99,11 @@ export function createTestClipboard() {
         const count = countFormats();
         const formats = [];
         for (let format = nextFormat(0); format; format = nextFormat(format)) formats.push(format);
-        // CF_BITMAP is synthesized from the DIB when read back.
-        const hasDib = formats.includes(8) || formats.includes(17);
-        const stored = formats.filter(format => format !== 2 || !hasDib);
-        if (count !== formats.length || stored.some(format => !supportsSnapshot(format)))
+        // CF_BITMAP is a GDI handle. A coexisting DIB does not prove it is a substitute.
+        if (count !== formats.length || formats.some(format => !supportsSnapshot(format)))
           throw new Error('当前剪贴板格式无法安全备份。请在禁用剪贴板共享的 Windows 会话中运行图片复制测试。');
         let total = 0;
-        snapshot = stored.map(format => {
+        snapshot = formats.map(format => {
           const memory = getData(format);
           const length = memory ? Number(size(memory)) : 0;
           total += length;
@@ -133,12 +130,12 @@ export function createTestClipboard() {
     expectedRevision() { return lastWrite ?? initialRevision; },
     writeText(text) { return writeFixture([{ format: 13, bytes: Buffer.from(text + '\0', 'utf16le') }]); },
     writeImage(png, dib) { return writeFixture([{ format: register('PNG'), bytes: png }, { format: 8, bytes: dib }]); },
-    async restore(testAppPid) {
-      if (snapshot === undefined || (!lastWrite && !testAppPid)) return false;
+    async restore(testAppPid, expected = lastWrite) {
+      if (snapshot === undefined || (!expected && !testAppPid)) return false;
       return withClipboard(() => {
         // The version and owner are checked while holding the lock used to restore.
         // A failed assertion may leave an unexpected write from the isolated test app.
-        if (!matches(lastWrite) && !currentOwnerIs(testAppPid)) return false;
+        if (!matches(expected) && !currentOwnerIs(testAppPid)) return false;
         publish(snapshot);
         initialRevision = lastWrite = snapshot = undefined;
         return true;
@@ -154,7 +151,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href &
     await clipboard.snapshot();
     await clipboard.writeText(process.argv[3]);
     console.log('ready');
-    process.stdin.resume();
-    await once(process.stdin, 'end');
+    let acknowledgement = '';
+    process.stdin.setEncoding('utf8');
+    for await (const chunk of process.stdin) acknowledgement += chunk;
+    // The parent normally restores its original snapshot. Before handoff, the
+    // writer is responsible for undoing its own write if the parent disconnects.
+    if (acknowledgement !== 'adopted\n') await clipboard.restore(process.pid);
   } finally { clipboard.dispose(); }
 }
