@@ -3,8 +3,10 @@ import { randomUUID, createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Attachment, BatchResult, Filter, Note, NoteDetail, NoteInput, NoteSummary, Overview, RichNode } from './shared.js';
-import type {ImportantDay,ImportantDayInput,DayReminder} from './shared.js';
+import type {ImportantDay,ImportantDayInput,DayReminder,DayImportResult} from './shared.js';
 import {validateImportantDay,reminderFor,orderedDays} from './important-days.js';
+import {planDayImport} from './important-days-transfer.js';
+import type {DayFileRecord,DayReminderRecord} from './important-days-transfer.js';
 
 export const EMPTY_DOC: RichNode = { type: 'doc', content: [{ type: 'paragraph' }] };
 export const imageMime: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.bmp': 'image/bmp' };
@@ -98,6 +100,49 @@ export class Store {
     if(!Array.isArray(keys)||keys.some(k=>typeof k!=='string'))throw new Error('提醒编号无效');
     const pending=this.pendingDayReminders(now).filter(r=>keys.includes(r.key));
     this.transaction(()=>{const stmt=this.db.prepare('INSERT OR IGNORE INTO day_reminders(key,dayId,seenAt) VALUES(?,?,?)');for(const r of pending)stmt.run(r.key,r.dayId,now.toISOString());});
+  }
+  // Acknowledged reminder nodes travel with the exported day so restoring it on
+  // another computer does not re-announce a date the user has already seen.
+  dayReminders(id:string):DayReminderRecord[] {
+    assertId(id);
+    const rows=this.db.prepare('SELECT key,seenAt FROM day_reminders WHERE dayId=?').all(id) as {key:string;seenAt:string}[];
+    const state:DayReminderRecord[]=[];
+    for(const row of rows){
+      const [,occurrence,stage,extra]=String(row.key).split('/');
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(occurrence??'')||(stage!=='advance'&&stage!=='today')||!Number.isFinite(Date.parse(row.seenAt)))continue;
+      if(stage==='advance'&&!/^\d{1,3}$/.test(extra??''))continue;
+      state.push({occurrence,stage,seenAt:new Date(Date.parse(row.seenAt)).toISOString()});
+    }
+    return state;
+  }
+  importImportantDays(rows:DayFileRecord[],choice:'local'|'incoming'):DayImportResult {
+    if(!Array.isArray(rows)||!rows.length)throw new Error('文件里没有可以导入的重要日子');
+    if(choice!=='local'&&choice!=='incoming')throw new Error('请选择冲突日子的处理方式');
+    const plan=planDayImport(this.listImportantDays(),rows);
+    let added=0,updated=0;
+    this.transaction(()=>{
+      for(const row of plan.added){this.insertImportedDay(row);added++;}
+      if(choice==='incoming')for(const {local,incoming} of plan.conflicts){this.overwriteImportedDay(local,incoming);updated++;}
+    });
+    return {added,updated,skipped:plan.duplicates+(choice==='local'?plan.conflicts.length:0)};
+  }
+  private insertImportedDay(row:DayFileRecord) {
+    const value=validateImportantDay(row);
+    // An id from the export keeps later imports of the same file identifiable;
+    // anything unknown or already taken gets a fresh local id.
+    const reusable=!!row.id&&/^[a-f\d-]{36}$/.test(row.id)&&!this.db.prepare('SELECT id FROM important_days WHERE id=?').get(row.id);
+    const id=reusable?row.id!:randomUUID();
+    const now=new Date().toISOString(),createdAt=row.createdAt??now,updatedAt=row.updatedAt??createdAt;
+    this.db.prepare(`INSERT INTO important_days(id,name,calendar,year,month,day,isLeapMonth,yearly,reminderDays,note,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(id,value.name,value.calendar,value.year,value.month,value.day,Number(value.isLeapMonth),Number(value.yearly),value.reminderDays,value.note,createdAt,updatedAt);
+    const stmt=this.db.prepare('INSERT OR IGNORE INTO day_reminders(key,dayId,seenAt) VALUES(?,?,?)');
+    for(const reminder of row.reminded)stmt.run(`${id}/${reminder.occurrence}/${reminder.stage}${reminder.stage==='advance'?`/${value.reminderDays}`:''}`,id,reminder.seenAt);
+  }
+  private overwriteImportedDay(local:ImportantDay,incoming:DayFileRecord) {
+    const value=validateImportantDay(incoming),now=new Date().toISOString();
+    this.db.prepare(`UPDATE important_days SET name=?,calendar=?,year=?,month=?,day=?,isLeapMonth=?,yearly=?,reminderDays=?,note=?,updatedAt=? WHERE id=?`)
+      .run(value.name,value.calendar,value.year,value.month,value.day,Number(value.isLeapMonth),Number(value.yearly),value.reminderDays,value.note,now,local.id);
+    if(['calendar','year','month','day','isLeapMonth','yearly','reminderDays'].some(k=>local[k as keyof ImportantDay]!==value[k as keyof ImportantDayInput]))this.db.prepare('DELETE FROM day_reminders WHERE dayId=?').run(local.id);
   }
   private decode(row: Record<string, unknown>): Note {
     return { ...row, document: JSON.parse(String(row.document)), tags: JSON.parse(String(row.tags)), pinned: Boolean(row.pinned) } as unknown as Note;

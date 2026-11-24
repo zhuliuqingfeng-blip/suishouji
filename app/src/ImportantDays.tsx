@@ -1,5 +1,5 @@
 import {useEffect,useId,useLayoutEffect,useRef,useState,type MutableRefObject} from 'react';
-import {ArrowUpRight,Plus,X,ChevronDown,ArrowLeft} from 'lucide-react';
+import {ArrowUpRight,Plus,X,ChevronDown,ArrowLeft,MoreHorizontal,Download,Upload} from 'lucide-react';
 import type {ImportantDay,ImportantDayInput,NotesAPI,DayReminder} from '../electron/shared';
 import {dayDistance,occurrence,orderedDays,originalDate,validateImportantDay,solarDateLabel,lunarRepeatRule} from '../electron/important-days';
 import {LUNAR_MIN_YEAR,LUNAR_MAX_YEAR,LUNAR_RANGE,lunarMonthOptions,lunarMonthName,lunarDayName,lunarToSolar} from '../electron/lunar-calendar';
@@ -24,7 +24,7 @@ export function useImportantDays(api:NotesAPI,paused:boolean){
   return {entries,pending,now,error,loaded,refresh,acknowledge};
 }
 
-export function ImportantDaysPage({entries,now,error,loaded,busy,onAdd,onOpen,onRetry}:{entries:ImportantDay[];now:Date;error:string;loaded:boolean;busy:boolean;onAdd:()=>void;onOpen:(entry:ImportantDay)=>void;onRetry:()=>void}){
+export function ImportantDaysPage({entries,now,error,loaded,busy,onAdd,onOpen,onRetry,onExport,onImport,moreOpen,onToggleMore}:{entries:ImportantDay[];now:Date;error:string;loaded:boolean;busy:boolean;onAdd:()=>void;onOpen:(entry:ImportantDay)=>void;onRetry:()=>void;onExport:()=>void;onImport:()=>void;moreOpen:boolean;onToggleMore:()=>void}){
   const ordered=orderedDays(entries,now),upcoming=ordered.filter(o=>o.days>=0),past=ordered.filter(o=>o.days<0).reverse();
   const rows=(items:typeof ordered)=>items.map(o=><button className={`important-day-row ${o.days===0?'is-today':''}`} key={o.entry.id} disabled={busy} onClick={()=>onOpen(o.entry)}>
     <span className="day-row-copy"><strong>{o.entry.name}</strong><span>{originalDate(o.entry)}{o.adjusted?' · 平年按2月最后一天':''}</span>{o.entry.calendar==='lunar'&&<small className="day-row-solar">{o.date?`${o.entry.yearly?'下次':'对应公历'}：${solarDateLabel(o.date)}`:`农历${LUNAR_RANGE}年内没有可计算的下次日期`}</small>}</span>
@@ -32,7 +32,18 @@ export function ImportantDaysPage({entries,now,error,loaded,busy,onAdd,onOpen,on
   </button>);
   return <main className="important-days-page" aria-label="重要日子" aria-busy={busy}>
     <div className="important-days-inner">
-      <header className="important-days-heading"><div><h1>重要日子</h1><p>把重要的人和日子，记在这里。</p></div><button className="day-add" aria-label="添加重要日子" onClick={onAdd} disabled={busy||!loaded}><Plus size={17}/>添加</button></header>
+      <header className="important-days-heading"><div><h1>重要日子</h1><p>把重要的人和日子，记在这里。</p></div>
+        <div className="day-heading-actions">
+          <button className="day-add" aria-label="添加重要日子" onClick={onAdd} disabled={busy||!loaded}><Plus size={17}/>添加</button>
+          <div className="day-more-anchor">
+            <button className="day-more" aria-label="更多重要日子操作" title="导入、导出重要日子" aria-haspopup="menu" aria-expanded={moreOpen} disabled={busy||!loaded} onClick={onToggleMore}><MoreHorizontal size={19}/></button>
+            {moreOpen&&<div className="dropdown day-more-menu" role="menu" aria-label="重要日子导入导出" onClick={e=>e.stopPropagation()}>
+              <button role="menuitem" aria-disabled={!entries.length} onClick={()=>{if(entries.length)onExport();}}><Download/>导出重要日子</button>
+              <button role="menuitem" onClick={onImport}><Upload/>导入重要日子</button>
+            </div>}
+          </div>
+        </div>
+      </header>
       {error?<div className="days-unavailable" role="alert"><p>暂时没能读取重要日子：{error}</p><button onClick={onRetry}>重新读取</button></div>:!loaded?<p className="days-empty">正在翻开重要日子…</p>:<>
         {upcoming.length?<div className="important-days-list">{rows(upcoming)}</div>:<p className="days-empty">{past.length?'接下来的日子，等你慢慢记下。':'生日、纪念日，或其他不想忘记的日期。\n从上方添加第一个重要日子。'}</p>}
         {!!past.length&&<details className="past-days"><summary>过去的日子 <ChevronDown size={14}/></summary><div>{rows(past)}</div></details>}
