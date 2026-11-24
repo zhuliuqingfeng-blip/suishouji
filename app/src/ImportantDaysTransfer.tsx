@@ -4,6 +4,8 @@ import type {DayExportResult,DayImportPreview} from '../electron/shared';
 
 const dateText=(value:string)=>new Date(value).toLocaleString('zh-CN',{hour12:false});
 type FocusTarget=MutableRefObject<HTMLElement|null>;
+// A merge decision applies to every conflict, so the list is a sample, not a form.
+const DISPLAYED_CONFLICTS=20;
 
 // A failure must be visible even when the conflict list pushed the body down.
 function ErrorNote({message}:{message:string}){
@@ -65,10 +67,11 @@ export function DayImportDialog({preview,error,working,onCancel,onConfirm,onRetr
           <button type="button" aria-pressed={conflict==='local'} disabled={working} onClick={()=>setConflict('local')}>保留本地版本</button>
           <button type="button" aria-pressed={conflict==='incoming'} disabled={working} onClick={()=>setConflict('incoming')}>采用导入版本</button>
         </div>
-        <ul className="day-conflict-list">{preview.conflicts.map((item,index)=><li key={index}>
+        <ul className="day-conflict-list">{preview.conflicts.slice(0,DISPLAYED_CONFLICTS).map((item,index)=><li key={index}>
           <strong>{item.title}</strong>
           {item.differences.map(difference=><span key={difference.field}><em>{difference.label}</em>本地 {difference.local} · 导入 {difference.incoming}</span>)}
         </li>)}</ul>
+        {preview.conflicts.length>DISPLAYED_CONFLICTS&&<p className="day-form-help">另有 {preview.conflicts.length-DISPLAYED_CONFLICTS} 条冲突未逐条列出，上面的处理方式对它们同样适用。</p>}
       </section>}
       {empty&&<p className="day-form-help">文件里的日子都已经存在，没有需要导入的内容。</p>}
       {!empty&&!preview.conflicts.length&&<p className="day-form-help">现有重要日子不会被删除，导入的内容会与本地合并。</p>}

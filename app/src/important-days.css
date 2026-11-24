@@ -12,9 +12,9 @@
 .day-more {display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;background:transparent;color:var(--muted);border-radius:3px}
 .day-more:hover,.day-more[aria-expanded=true] {background:var(--soft);color:var(--accent-deep)}
 .day-more-menu {right:0;top:calc(100% + 4px);min-width:186px}
-.day-more-menu button[aria-disabled=true],.day-more-menu button:disabled {color:#a9a3b4;cursor:default}
-.day-more-menu button[aria-disabled=true] svg,.day-more-menu button:disabled svg {color:#a9a3b4}
-.day-more-menu button[aria-disabled=true]:hover,.day-more-menu button:disabled:hover {background:none}
+.day-more-menu button:disabled {color:#a9a3b4;cursor:default}
+.day-more-menu button:disabled svg {color:#a9a3b4}
+.day-more-menu button:disabled:hover {background:none}
 .day-transfer-body {padding:12px 28px 20px;overflow-y:auto;min-height:0}
 .day-transfer-lead {font-size:14px;line-height:1.9;margin:0 0 6px}
 .day-transfer-lead b {font-size:16px;font-weight:600}

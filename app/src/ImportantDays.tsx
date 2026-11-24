@@ -15,7 +15,7 @@ export function useImportantDays(api:NotesAPI,paused:boolean){
     if(pausedRef.current&&!force)return;
     const seq=++sequence.current;
     try{const [days,reminders]=await Promise.all([api.listImportantDays(),api.pendingDayReminders()]);if(seq!==sequence.current)return;setEntries(days);setPending(reminders);setNow(new Date());setError('');setLoaded(true);}
-    catch(e){if(seq===sequence.current)setError(e instanceof Error?e.message:String(e));}
+    catch(e){if(seq===sequence.current&&!force)setError(e instanceof Error?e.message:String(e));}
   }
   useEffect(()=>{
     const check=()=>{if(document.visibilityState!=='hidden')void refresh();};
