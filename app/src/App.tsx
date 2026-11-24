@@ -186,10 +186,14 @@ export default function App() {
   });
   useEffect(() => { editor?.setEditable(!readOnly, false); }, [editor, readOnly]);
   useEffect(() => {
-    // A later native copy takes precedence over an image still being encoded.
+    // A later native copy or cut takes precedence over an image still being prepared.
     const invalidate = () => { copyRequest.current++; };
     document.addEventListener('copy', invalidate, true);
-    return () => document.removeEventListener('copy', invalidate, true);
+    document.addEventListener('cut', invalidate, true);
+    return () => {
+      document.removeEventListener('copy', invalidate, true);
+      document.removeEventListener('cut', invalidate, true);
+    };
   }, []);
   async function copyImage(id: string, position?: MenuPosition) {
     if (blocked || !current.current) return;

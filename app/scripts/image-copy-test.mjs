@@ -12,7 +12,14 @@ await fs.mkdir(testRoot, { recursive: true });
 const root = await fs.mkdtemp(path.join(testRoot, 'image-copy-'));
 const data = path.join(root, 'data');
 const exe = process.env.NOTES_PACKAGED_EXE;
-const width = 1200, height = 47;
+const fixtures = [
+  { ext: 'png', size: [1200, 47] },
+  { ext: 'jpeg', size: [1184, 53] },
+  { ext: 'webp', size: [1168, 59] },
+  { ext: 'bmp', size: [1152, 65] },
+  { ext: 'gif', size: [1136, 71] },
+];
+const [width, height] = fixtures[0].size;
 let instance, page, savedClipboard;
 
 async function start() {
@@ -47,13 +54,61 @@ async function clipboardInfo() {
   });
 }
 
-async function checkClipboardImage() {
+async function checkClipboardImage({ ext, size }) {
   for (let i = 0; i < 50; i++) {
     const result = await clipboardInfo();
-    if (result.size) { assert.deepEqual(result, { size: [width, height], text: '', html: false }); return; }
+    if (result.size) { assert.deepEqual(result, { size, text: '', html: false }, `剪贴板应包含选中的 ${ext} 图片`); return; }
     await new Promise(resolve => setTimeout(resolve, 100));
   }
   assert.fail('系统剪贴板没有图片：' + await page.locator('.toast').allTextContents());
+}
+
+async function checkCutDuringImageRead(image, source, field, expected, isTitle) {
+  await instance.evaluate((_electron, file) => {
+    const fs = process.getBuiltinModule('node:fs/promises');
+    const readFile = fs.readFile;
+    const race = { started: false, release: null };
+    const blocked = new Promise(resolve => { race.release = resolve; });
+    race.restore = () => { fs.readFile = readFile; race.release(); };
+    globalThis.__cutRace = race;
+    fs.readFile = async (filePath, ...args) => {
+      const bytes = await readFile(filePath, ...args);
+      if (filePath === file) { race.started = true; await blocked; }
+      return bytes;
+    };
+  }, source);
+  try {
+    await image.click();
+    await page.keyboard.press('Control+c');
+    for (let i = 0; i < 50; i++) {
+      if (await instance.evaluate(() => globalThis.__cutRace.started)) break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    assert.ok(await instance.evaluate(() => globalThis.__cutRace.started), '图片复制应该已开始读原图');
+    if (isTitle) {
+      await field.fill(expected);
+      await field.selectText();
+    } else {
+      await field.evaluate(element => {
+        const range = document.createRange(); range.selectNodeContents(element);
+        document.querySelector('.tiptap').focus();
+        const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
+      });
+      await page.waitForFunction(value => window.getSelection().toString() === value, expected);
+    }
+    await page.keyboard.press('Control+x');
+    assert.equal(await instance.evaluate(({ clipboard }) => clipboard.readText()), expected);
+    await instance.evaluate(() => globalThis.__cutRace.release());
+    // Allow the resumed image request time to reach the clipboard if it was not canceled.
+    await page.waitForTimeout(500);
+    const afterRead = await clipboardInfo();
+    assert.equal(afterRead.text, expected, '切出的文字应保留在剪贴板中');
+    assert.equal(afterRead.size, null);
+    await page.keyboard.press('Control+v');
+    assert.equal(isTitle ? await field.inputValue() : await field.innerText(), expected);
+  } finally {
+    await instance.evaluate(() => globalThis.__cutRace.restore());
+  }
 }
 
 async function checkNativePaste() {
@@ -98,26 +153,29 @@ async function checkExternalAppPaste() {
 try {
   await fs.mkdir(data, { recursive: true });
   await start();
-  const pixels = await page.evaluate(({ width, height }) => {
+  const pixels = await page.evaluate(formats => formats.map(({ ext, size: [width, height] }) => {
     const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
     const context = canvas.getContext('2d'); context.fillStyle = '#df1231'; context.fillRect(0, 0, width, height);
     context.fillStyle = '#128f35'; context.fillRect(width - 50, 0, 50, height);
-    return ['png', 'jpeg', 'webp'].map(ext => [ext, canvas.toDataURL(`image/${ext}`, 0.95).split(',')[1]]);
-  }, { width, height });
-  const sources = [];
-  for (const [ext, encoded] of pixels) {
-    const file = path.join(root, `copy.${ext}`); await fs.writeFile(file, Buffer.from(encoded, 'base64')); sources.push(file);
+    const format = ext === 'bmp' || ext === 'gif' ? 'png' : ext;
+    return canvas.toDataURL(`image/${format}`, 0.95).split(',')[1];
+  }), fixtures);
+  const sources = fixtures.map(({ ext }) => path.join(root, `copy.${ext}`));
+  for (const [index, { ext }] of fixtures.entries()) {
+    const file = ext === 'bmp' || ext === 'gif' ? path.join(root, `copy-${ext}.png`) : sources[index];
+    await fs.writeFile(file, Buffer.from(pixels[index], 'base64'));
   }
   await execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `
     $ErrorActionPreference='Stop'
     Add-Type -AssemblyName System.Drawing
-    $bitmap=[Drawing.Image]::FromFile($env:MEMO_TEST_PNG)
-    try {
-      $bitmap.Save([IO.Path]::ChangeExtension($env:MEMO_TEST_PNG,'bmp'),[Drawing.Imaging.ImageFormat]::Bmp)
-      $bitmap.Save([IO.Path]::ChangeExtension($env:MEMO_TEST_PNG,'gif'),[Drawing.Imaging.ImageFormat]::Gif)
-    } finally { $bitmap.Dispose() }
-  `], { env: { ...process.env, MEMO_TEST_PNG: sources[0] }, windowsHide: true });
-  sources.push(path.join(root, 'copy.bmp'), path.join(root, 'copy.gif'));
+    foreach($ext in @('bmp','gif')) {
+      $format=if($ext -eq 'bmp'){[Drawing.Imaging.ImageFormat]::Bmp}else{[Drawing.Imaging.ImageFormat]::Gif}
+      $inputFile=Join-Path $env:MEMO_TEST_FIXTURES ('copy-'+$ext+'.png')
+      $outputFile=Join-Path $env:MEMO_TEST_FIXTURES ('copy.'+$ext)
+      $bitmap=[Drawing.Image]::FromFile($inputFile)
+      try { $bitmap.Save($outputFile,$format) } finally { $bitmap.Dispose() }
+    }
+  `], { env: { ...process.env, MEMO_TEST_FIXTURES: root }, windowsHide: true });
 
   await page.keyboard.press('Control+n');
   await page.getByLabel('记录标题').fill('原图复制专项');
@@ -133,7 +191,7 @@ try {
   await instance.evaluate(async ({ clipboard, ClipboardItem }, base64) => {
     const bytes = Buffer.from(base64, 'base64');
     await clipboard.write([new ClipboardItem({ 'image/png': new Blob([bytes], { type: 'image/png' }) })]);
-  }, pixels[0][1]);
+  }, pixels[0]);
   await page.keyboard.press('Control+v');
   await page.locator('.tiptap img').waitFor();
   await page.keyboard.press('Control+s');
@@ -175,19 +233,20 @@ try {
   await instance.evaluate(({ clipboard }, marker) => clipboard.writeText(marker), rightClickMarker);
   assert.deepEqual(await clipboardInfo(), { size: null, text: rightClickMarker, html: false });
   await images.first().click({ button: 'right' });
-  await checkClipboardImage();
+  await checkClipboardImage(fixtures[0]);
   assert.deepEqual(await instance.evaluate(() => globalThis.__imageMenuLabels), ['复制图片']);
   assert.equal(await page.evaluate(() => window.getSelection().toString()), '普通文字依然可以复制');
   await checkNativePaste();
   await checkExternalAppPaste();
   console.log('右键复制后，Windows WinForms 读到原分辨率位图，独立 Edge 窗口 Ctrl+V 收到图片');
 
-  for (let i = 0; i < 5; i++) {
+  for (const [i, fixture] of fixtures.entries()) {
     await instance.evaluate(({ clipboard }) => clipboard.writeText('等待复制'));
-    await images.nth(i).click();
+    // Distinct click positions avoid double-click detection when scrolling brings images to the same spot.
+    await images.nth(i).click({ position: { x: 40 + i * 32, y: 5 } });
     await images.nth(i).and(page.locator('.ProseMirror-selectednode')).waitFor();
     await page.keyboard.press('Control+c');
-    await checkClipboardImage();
+    await checkClipboardImage(fixture);
   }
   console.log('PNG、JPEG、WebP、BMP、GIF 经 Ctrl+C 复制为原分辨率图片');
 
@@ -225,6 +284,12 @@ try {
   await page.getByRole('alert').filter({ hasText: '无法读取原图' }).waitFor();
   assert.equal((await clipboardInfo()).text, '普通文字依然可以复制');
   console.log('原图缺失或剪贴板写入失败会给出提示，之前的剪贴板内容仍可用');
+
+  const firstImageId = original.note.document.content.find(node => node.type === 'image').attrs.assetId;
+  const source = path.join(data, original.attachments.find(asset => asset.id === firstImageId).relativePath);
+  await checkCutDuringImageRead(images.first(), source, page.getByLabel('记录标题'), '等待期间剪切的标题', true);
+  await checkCutDuringImageRead(images.first(), source, text, '普通文字依然可以复制', false);
+  console.log('图片原件读取延迟时，标题和正文剪切的文字仍可粘贴');
 } finally {
   if (instance) {
     try { await restoreClipboard(); }
