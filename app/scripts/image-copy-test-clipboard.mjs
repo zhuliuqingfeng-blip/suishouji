@@ -55,6 +55,11 @@ export function createTestClipboard() {
 
   const revision = () => ({ sequence: sequence(), owner: owner() });
   const matches = expected => expected && sequence() === expected.sequence && owner() === expected.owner;
+  function currentOwnerIs(pid) {
+    const handle = owner();
+    const currentPid = [0];
+    return !!pid && !!handle && ownerProcess(handle, currentPid) !== 0 && currentPid[0] === pid;
+  }
 
   function publish(entries) {
     const prepared = [];
@@ -79,7 +84,11 @@ export function createTestClipboard() {
   async function writeFixture(entries) {
     if (entries.some(entry => !entry.format)) throw new Error('无法注册剪贴板测试格式');
     await withClipboard(() => {
-      if (!matches(lastWrite ?? initialRevision)) throw new Error('剪贴板已被其他程序更新，已停止写入测试数据');
+      // Windows can synthesize more formats after a write. The private fixture
+      // window still owns those bytes even if the sequence advanced.
+      const ownsFixture = lastWrite?.owner === hwnd && owner() === hwnd;
+      if (!ownsFixture && !matches(lastWrite ?? initialRevision))
+        throw new Error('剪贴板已被其他程序更新，已停止写入测试数据');
       publish(entries);
       lastWrite = revision();
     });
@@ -116,20 +125,20 @@ export function createTestClipboard() {
     },
     async rememberWrite(pid) {
       return withClipboard(() => {
-        const currentOwner = owner();
-        const currentPid = [0];
-        if (!currentOwner || !ownerProcess(currentOwner, currentPid) || currentPid[0] !== pid) return false;
-        lastWrite = { sequence: sequence(), owner: currentOwner };
+        if (!currentOwnerIs(pid)) return false;
+        lastWrite = revision();
         return true;
       });
     },
+    expectedRevision() { return lastWrite ?? initialRevision; },
     writeText(text) { return writeFixture([{ format: 13, bytes: Buffer.from(text + '\0', 'utf16le') }]); },
     writeImage(png, dib) { return writeFixture([{ format: register('PNG'), bytes: png }, { format: 8, bytes: dib }]); },
-    async restore() {
-      if (snapshot === undefined || !lastWrite) return false;
+    async restore(testAppPid) {
+      if (snapshot === undefined || (!lastWrite && !testAppPid)) return false;
       return withClipboard(() => {
         // The version and owner are checked while holding the lock used to restore.
-        if (!matches(lastWrite)) return false;
+        // A failed assertion may leave an unexpected write from the isolated test app.
+        if (!matches(lastWrite) && !currentOwnerIs(testAppPid)) return false;
         publish(snapshot);
         initialRevision = lastWrite = snapshot = undefined;
         return true;

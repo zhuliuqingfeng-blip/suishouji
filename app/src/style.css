@@ -928,6 +928,7 @@ kbd {
   box-shadow:0 5px 20px #53436604
 }
 .page-heading {
+  position:relative;
   border-bottom:1px solid #e8e1e9;
   padding-bottom:23px;
   margin-bottom:30px
@@ -1099,13 +1100,16 @@ kbd {
   font-size:14px
 }
 .image-controls {
+  /* Use the gap below the heading without reflowing the image on its first click. */
+  position:absolute;
+  inset:100% 0 auto;
+  height:30px;
   display:flex;
   align-items:center;
   gap:9px;
-  padding:9px 0 14px;
   font-size:10px;
   color:#786088;
-  flex-wrap:wrap
+  white-space:nowrap
 }
 .image-controls button {
   padding:4px 9px;
@@ -1114,7 +1118,9 @@ kbd {
 }
 .image-controls>span:last-child {
   margin-left:auto;
-  font-size:9px
+  font-size:9px;
+  overflow:hidden;
+  text-overflow:ellipsis
 }
 .attachments-section {
   margin-top:36px;
