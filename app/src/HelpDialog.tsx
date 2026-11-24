@@ -60,7 +60,7 @@ export function HelpDialog({info, onClose, onOpenDataDir}: {
           <div className="usage-help-answer"><p>按 <kbd>Ctrl Shift V</kbd> 粘贴为纯文本，保留文字和换行，去掉来源的字体、颜色等格式。</p><p>想复制干净的文字，选中正文后按 <kbd>Ctrl Shift C</kbd>。工具栏“纯文本”里也能找到这两个操作。</p></div>
         </details>
         <details name="usage-help-topic"><summary>生日和纪念日怎么记？<ChevronDown size={16}/></summary>
-          <div className="usage-help-answer"><p>打开顶部“重要日子”，点“＋ 添加”。公历、农历都可以，生日和纪念日可选“每年重复”，年份可以留空。</p><p>默认提前 14 天和当天提醒，临近时首页也会轻轻提示。提醒在软件运行时生效，关闭后不会在后台提醒。</p></div>
+          <div className="usage-help-answer"><p>打开顶部“重要日子”，点“＋ 添加”。公历、农历都可以，生日和纪念日可选“每年重复”，年份可以留空。</p><p>默认提前 14 天和当天提醒，临近时首页也会轻轻提示。提醒在软件运行时生效，关闭后不会在后台提醒。</p><p>只想带走这些日子？点页面右上角的“⋯”，可以单独导出成一个文件，换电脑或重装后再导入；导入只合并，不会删除现有的日子。</p></div>
         </details>
         <details name="usage-help-topic"><summary>数据与备份<ChevronDown size={16}/></summary>
           <div className="usage-help-answer">

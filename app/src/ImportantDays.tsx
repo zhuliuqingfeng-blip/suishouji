@@ -9,8 +9,10 @@ export function useImportantDays(api:NotesAPI,paused:boolean){
   const [entries,setEntries]=useState<ImportantDay[]>([]),[pending,setPending]=useState<DayReminder[]>([]);
   const [now,setNow]=useState(()=>new Date()),[error,setError]=useState(''),[loaded,setLoaded]=useState(false);
   const sequence=useRef(0),pausedRef=useRef(paused);pausedRef.current=paused;
-  async function refresh(){
-    if(pausedRef.current)return;
+  // force skips the paused short circuit: after an import the write is already
+  // committed, and the list must show it even if the busy flag has not cleared.
+  async function refresh(force=false){
+    if(pausedRef.current&&!force)return;
     const seq=++sequence.current;
     try{const [days,reminders]=await Promise.all([api.listImportantDays(),api.pendingDayReminders()]);if(seq!==sequence.current)return;setEntries(days);setPending(reminders);setNow(new Date());setError('');setLoaded(true);}
     catch(e){if(seq===sequence.current)setError(e instanceof Error?e.message:String(e));}
@@ -38,7 +40,7 @@ export function ImportantDaysPage({entries,now,error,loaded,busy,onAdd,onOpen,on
           <div className="day-more-anchor">
             <button className="day-more" aria-label="更多重要日子操作" title="导入、导出重要日子" aria-haspopup="menu" aria-expanded={moreOpen} disabled={busy||!loaded} onClick={onToggleMore}><MoreHorizontal size={19}/></button>
             {moreOpen&&<div className="dropdown day-more-menu" role="menu" aria-label="重要日子导入导出" onClick={e=>e.stopPropagation()}>
-              <button role="menuitem" aria-disabled={!entries.length} onClick={()=>{if(entries.length)onExport();}}><Download/>导出重要日子</button>
+              <button role="menuitem" disabled={!entries.length} title={entries.length?'':'还没有重要日子可以导出'} onClick={onExport}><Download/>导出重要日子</button>
               <button role="menuitem" onClick={onImport}><Upload/>导入重要日子</button>
             </div>}
           </div>

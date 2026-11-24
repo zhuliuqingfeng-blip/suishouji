@@ -339,7 +339,7 @@ export default function App() {
     if(!dayImport||dayImportWorking)return;
     setDayImportWorking(true);setDayImportError('');
     try{
-      const result=await api.applyImportImportantDays(dayImport.token,choice);setDayImport(null);await days.refresh();
+      const result=await api.applyImportImportantDays(dayImport.token,choice);setDayImport(null);await days.refresh(true);
       const parts=[result.added?`新增 ${result.added} 条`:'',result.updated?`更新 ${result.updated} 条`:'',result.skipped?`跳过 ${result.skipped} 条重复记录`:'',result.keptLocal?`保留 ${result.keptLocal} 条本地记录`:''].filter(Boolean);
       notify(result.added||result.updated?`重要日子已导入：${parts.join('，')}`:`没有新的重要日子${parts.length?`，${parts.join('，')}`:''}`);
     }catch(e){
@@ -587,7 +587,7 @@ export default function App() {
     <footer className="app-status"><span><HardDrive size={12}/><span>本地存储</span><b>·</b>{inHome?'首页':inDays?'重要日子':inLibrary?(trash?'回收站':'手记库'):layout.focused?'专注书写':'书写页'}</span>{saveStatus}<span className="status-hint">{inDays?'':inHome||inLibrary?'Ctrl N 新建 · Ctrl F 查找':note?.deletedAt?'回收站 · 只读':`${note?.plainText.replace(/\s/g,'').length??0} 字 · Ctrl S 保存`}</span></footer>
     {dayDialog&&<ImportantDayDialog entry={dayDialog} api={api} closeRequest={dayCloseRequest} onSaved={days.refresh} onClose={()=>setDayDialog(null)}/>}
     {dayExport&&<DayExportDialog result={dayExport} error={dayExportError} returnFocus={dayReturnFocus} onReveal={()=>{setDayExportError('');void api.revealExportedFile().catch(e=>setDayExportError(e instanceof Error?e.message:String(e)));}} onClose={()=>{setDayExport(null);setDayExportError('');}}/>}
-    {dayImport&&<DayImportDialog preview={dayImport} error={dayImportError} working={dayImportWorking} returnFocus={dayReturnFocus} onCancel={()=>{setDayImport(null);setDayImportError('');}} onConfirm={choice=>void applyDaysImport(choice)}/>}
+    {dayImport&&<DayImportDialog preview={dayImport} error={dayImportError} working={dayImportWorking} returnFocus={dayReturnFocus} onCancel={()=>{setDayImport(null);setDayImportError('');}} onRetry={()=>{setDayImport(null);setDayImportError('');void chooseDaysFile();}} onConfirm={choice=>void applyDaysImport(choice)}/>}
     {!inHome&&!inDays&&!dayDialog&&!operation&&!toast&&!undo&&reminderEntry&&<div className="day-reminder" role="status"><button onClick={()=>void openImportantDays(reminderEntry)}><span>{reminderEntry.name} · {dayDistance(occurrence(reminderEntry,days.now).days)}{days.pending.length>1?`，另有${days.pending.length-1}个重要日子`:''}</span><ArrowUpRight size={14}/></button><button aria-label="收起日子提醒" onClick={()=>void days.acknowledge(days.pending.map(r=>r.key)).catch(report)}><X size={14}/></button></div>}
 
     {context&&<div className="dropdown context-menu" role="menu" aria-label="记录右键菜单" style={{left:Math.max(8,context.x),top:Math.max(8,context.y)}} onClick={e=>e.stopPropagation()} onKeyDown={e=>{if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();const buttons=[...e.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')],at=buttons.indexOf(document.activeElement as HTMLButtonElement);buttons[(at+(e.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length]?.focus();}}}>
