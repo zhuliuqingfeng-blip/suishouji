@@ -78,6 +78,9 @@ export default function App() {
   const [dayDialog,setDayDialog]=useState<ImportantDay|'new'|null>(null);
   const [dayMenu,setDayMenu]=useState(false),[dayExport,setDayExport]=useState<DayExportResult|null>(null);
   const [dayImport,setDayImport]=useState<DayImportPreview|null>(null),[dayImportWorking,setDayImportWorking]=useState(false);
+  const [dayExportError,setDayExportError]=useState(''),[dayImportError,setDayImportError]=useState('');
+  // Focus goes back to the "⋯" button, not to the document start.
+  const dayReturnFocus=useRef<HTMLElement|null>(null);
   const dayCloseRequest=useRef<DayCloseHandler|null>(null);
   const [toast, setToast] = useState<{ message: string; error?: boolean } | null>(null), [menu, setMenu] = useState(false), [noteMenu, setNoteMenu] = useState(false), [help, setHelp] = useState(false);
   const [info, setInfo] = useState<AppInfo | null>(null), [zoom, setZoom] = useState<string | null>(null), [tagInput, setTagInput] = useState(''), [, forceToolbar] = useState(0);
@@ -316,27 +319,34 @@ export default function App() {
   }
   // Important days travel in their own versioned file. Only the count, the
   // preview summary and an opaque token cross the IPC boundary.
+  function rememberDayTrigger(){
+    // The focused menu item disappears with the dropdown, so return focus to the
+    // button that opened it instead of dropping the keyboard user on <body>.
+    const active=document.querySelector<HTMLElement>('.day-more')??document.activeElement;
+    dayReturnFocus.current=active instanceof HTMLElement?active:null;
+  }
   async function exportDays(){
-    if(blocked)return;setDayMenu(false);setSwitching(true);
+    if(blocked)return;rememberDayTrigger();setDayMenu(false);setDayExportError('');setSwitching(true);
     try{const result=await api.exportImportantDays();if(result)setDayExport(result);}
     catch(e){report(e);}finally{setSwitching(false);}
   }
   async function chooseDaysFile(){
-    if(blocked)return;setDayMenu(false);setSwitching(true);
+    if(blocked)return;rememberDayTrigger();setDayMenu(false);setDayImportError('');setSwitching(true);
     try{const preview=await api.previewImportImportantDays();if(preview)setDayImport(preview);}
     catch(e){report(e);}finally{setSwitching(false);}
   }
   async function applyDaysImport(choice:'local'|'incoming'){
     if(!dayImport||dayImportWorking)return;
-    setDayImportWorking(true);
+    setDayImportWorking(true);setDayImportError('');
     try{
       const result=await api.applyImportImportantDays(dayImport.token,choice);setDayImport(null);await days.refresh();
-      if(!result.added&&!result.updated)notify(`没有新的重要日子，已跳过 ${result.skipped} 条重复记录`);
-      else{
-        const parts=[result.added?`新增 ${result.added} 条`:'',result.updated?`更新 ${result.updated} 条`:'',result.skipped?`跳过 ${result.skipped} 条重复记录`:''].filter(Boolean);
-        notify(`重要日子已导入：${parts.join('，')}`);
-      }
-    }catch(e){report(e);}finally{setDayImportWorking(false);}
+      const parts=[result.added?`新增 ${result.added} 条`:'',result.updated?`更新 ${result.updated} 条`:'',result.skipped?`跳过 ${result.skipped} 条重复记录`:'',result.keptLocal?`保留 ${result.keptLocal} 条本地记录`:''].filter(Boolean);
+      notify(result.added||result.updated?`重要日子已导入：${parts.join('，')}`:`没有新的重要日子${parts.length?`，${parts.join('，')}`:''}`);
+    }catch(e){
+      // The dialog stays open above the page, so its own message area is the only
+      // place the user can actually see the reason.
+      setDayImportError(e instanceof Error?e.message:String(e));
+    }finally{setDayImportWorking(false);}
   }
   async function newNote() {
     if (blocked) return;
@@ -438,6 +448,15 @@ export default function App() {
   useEffect(()=>{const visible=new Set(list.map(n=>n.id));setChecked(previous=>{const next=new Set([...previous].filter(id=>visible.has(id)));return next.size===previous.size?previous:next;});},[list]);
   useEffect(()=>{localStorage.setItem('suishouji:sort',sort);anchor.current=null;},[sort]);
   useEffect(()=>{if(layout.view!=='days')setDayMenu(false);},[layout.view]);
+  // A native <dialog> only blocks the pointer. While a transfer dialog is open,
+  // window shortcuts must not reach the page behind it, and closing the window
+  // has to go through this dialog first.
+  useEffect(()=>{
+    if(!dayImport&&!dayExport)return;
+    const handler:DayCloseHandler=(after)=>{setDayImport(null);setDayExport(null);after?.();};
+    dayCloseRequest.current=handler;
+    return ()=>{if(dayCloseRequest.current===handler)dayCloseRequest.current=null;};
+  },[dayImport,dayExport]);
   useEffect(()=>{if(!undo)return;const tick=()=>{const seconds=Math.max(0,Math.ceil((undo.expiresAt-Date.now())/1000));setUndoSeconds(seconds);if(!seconds)setUndo(null);};tick();const timer=setInterval(tick,250);return()=>clearInterval(timer);},[undo]);
   useLayoutEffect(()=>{if(searchPending.current&&layout.view!=='home'&&!switching){searchPending.current=false;focusEditor.current=false;searchInput.current?.focus();searchInput.current?.select();return;}if(focusEditor.current&&layout.view==='document'&&!switching){focusEditor.current=false;editor?.view.focus();}},[layout.focused,layout.indexHidden,layout.view,switching,editor]);
   useEffect(()=>{if(!context)return;const close=()=>setContext(null);window.addEventListener('resize',close);listArea.current?.addEventListener('scroll',close);return()=>{window.removeEventListener('resize',close);listArea.current?.removeEventListener('scroll',close);};},[context]);
@@ -567,8 +586,8 @@ export default function App() {
     </div>
     <footer className="app-status"><span><HardDrive size={12}/><span>本地存储</span><b>·</b>{inHome?'首页':inDays?'重要日子':inLibrary?(trash?'回收站':'手记库'):layout.focused?'专注书写':'书写页'}</span>{saveStatus}<span className="status-hint">{inDays?'':inHome||inLibrary?'Ctrl N 新建 · Ctrl F 查找':note?.deletedAt?'回收站 · 只读':`${note?.plainText.replace(/\s/g,'').length??0} 字 · Ctrl S 保存`}</span></footer>
     {dayDialog&&<ImportantDayDialog entry={dayDialog} api={api} closeRequest={dayCloseRequest} onSaved={days.refresh} onClose={()=>setDayDialog(null)}/>}
-    {dayExport&&<DayExportDialog result={dayExport} onReveal={()=>void api.revealExportedFile().catch(report)} onClose={()=>setDayExport(null)}/>}
-    {dayImport&&<DayImportDialog preview={dayImport} working={dayImportWorking} onCancel={()=>setDayImport(null)} onConfirm={choice=>void applyDaysImport(choice)}/>}
+    {dayExport&&<DayExportDialog result={dayExport} error={dayExportError} returnFocus={dayReturnFocus} onReveal={()=>{setDayExportError('');void api.revealExportedFile().catch(e=>setDayExportError(e instanceof Error?e.message:String(e)));}} onClose={()=>{setDayExport(null);setDayExportError('');}}/>}
+    {dayImport&&<DayImportDialog preview={dayImport} error={dayImportError} working={dayImportWorking} returnFocus={dayReturnFocus} onCancel={()=>{setDayImport(null);setDayImportError('');}} onConfirm={choice=>void applyDaysImport(choice)}/>}
     {!inHome&&!inDays&&!dayDialog&&!operation&&!toast&&!undo&&reminderEntry&&<div className="day-reminder" role="status"><button onClick={()=>void openImportantDays(reminderEntry)}><span>{reminderEntry.name} · {dayDistance(occurrence(reminderEntry,days.now).days)}{days.pending.length>1?`，另有${days.pending.length-1}个重要日子`:''}</span><ArrowUpRight size={14}/></button><button aria-label="收起日子提醒" onClick={()=>void days.acknowledge(days.pending.map(r=>r.key)).catch(report)}><X size={14}/></button></div>}
 
     {context&&<div className="dropdown context-menu" role="menu" aria-label="记录右键菜单" style={{left:Math.max(8,context.x),top:Math.max(8,context.y)}} onClick={e=>e.stopPropagation()} onKeyDown={e=>{if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();const buttons=[...e.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')],at=buttons.indexOf(document.activeElement as HTMLButtonElement);buttons[(at+(e.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length]?.focus();}}}>

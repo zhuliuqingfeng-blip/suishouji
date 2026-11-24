@@ -26,7 +26,7 @@ export interface DayImportPreview {
   token: string; fileName: string; exportedAt: string | null; total: number;
   added: number; duplicates: number; conflicts: DayImportConflict[];
 }
-export interface DayImportResult { added: number; updated: number; skipped: number }
+export interface DayImportResult { added: number; updated: number; skipped: number; keptLocal: number }
 export type Result<T> = { ok: true; data: T } | { ok: false; error: string };
 export type TextMenuAction = 'copyPlain' | 'pastePlain' | 'copyAllPlain';
 export interface MenuPosition { x: number; y: number }

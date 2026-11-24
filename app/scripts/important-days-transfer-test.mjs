@@ -93,6 +93,8 @@ try{
  assert.equal(await page.locator('.day-transfer-path').innerText(),exported);
  await geometry('export');await shot('02-导出完成');
  await page.getByRole('button',{name:'完成',exact:true}).click();await exportDialog().waitFor({state:'detached'});
+ // 关闭弹窗后焦点回到“⋯”，不把键盘用户丢到页面开头。
+ assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute('aria-label')),'更多重要日子操作');
  const file=JSON.parse(await fs.readFile(exported,'utf8'));
  assert.equal(file.format,'suishouji-important-days');assert.equal(file.version,1);assert.equal(file.count,5);assert.equal(file.days.length,5);
  assert.ok(Number.isFinite(Date.parse(file.exportedAt)));
@@ -109,6 +111,11 @@ try{
  await importDialog().waitFor();
  assert.equal(await page.locator('.day-transfer-lead').innerText(),'即将导入：2 条新增 · 3 条重复');
  assert.match(await page.locator('.day-transfer-file').innerText(),/随手记重要日子\.json/);
+ // 弹窗打开时，窗口级快捷键不能穿透到背后的页面。
+ await page.keyboard.press('Control+n');await page.keyboard.press('Control+f');
+ assert.equal(await page.locator('.document-mode').count(),0);
+ assert.equal(await page.locator('.library-mode').count(),0);
+ assert.equal(await importDialog().count(),1);
  await geometry('import');await shot('03-导入预览');
  await page.getByRole('button',{name:'确认导入',exact:true}).click();await importDialog().waitFor({state:'detached'});
  assert.match(await toast(),/新增 2 条/);

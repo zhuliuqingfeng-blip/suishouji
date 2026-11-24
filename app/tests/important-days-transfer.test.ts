@@ -77,11 +77,11 @@ test('合并导入只新增缺失记录，重复导入同一个文件不产生�
   const rows=rowsOf(source.store);
   const local=target.store.saveImportantDay({...onceDay,name:'本地已有的日子'});
   const first=target.store.importImportantDays(rows,'local');
-  assert.deepEqual(first,{added:3,updated:0,skipped:0});
+  assert.deepEqual(first,{added:3,updated:0,skipped:0,keptLocal:0});
   assert.equal(target.store.listImportantDays().length,4);
   assert.ok(target.store.listImportantDays().some(day=>day.id===local.id));
   const second=target.store.importImportantDays(rows,'local');
-  assert.deepEqual(second,{added:0,updated:0,skipped:3});
+  assert.deepEqual(second,{added:0,updated:0,skipped:3,keptLocal:0});
   assert.equal(target.store.listImportantDays().length,4);
   // 再次解析同一份文件得到同样的计划：0 新增、3 重复、0 冲突。
   assert.deepEqual(plan(target.store,rows).added.length,0);
@@ -108,12 +108,12 @@ test('内容不同不静默覆盖：默认保留本地，选择导入才更新�
   assert.deepEqual({label:conflict.differences[0].label,local:conflict.differences[0].local,incoming:conflict.differences[0].incoming},{label:'提前提醒',local:'提前30天',incoming:'提前7天'});
 
   const keep=target.store.importImportantDays(rows,'local');
-  assert.deepEqual(keep,{added:0,updated:0,skipped:1});
+  assert.deepEqual(keep,{added:0,updated:0,skipped:0,keptLocal:1});
   assert.equal(target.store.listImportantDays()[0].reminderDays,30);
   assert.equal(target.store.listImportantDays().length,1);
 
   const replace=target.store.importImportantDays(rows,'incoming');
-  assert.deepEqual(replace,{added:0,updated:1,skipped:0});
+  assert.deepEqual(replace,{added:0,updated:1,skipped:0,keptLocal:0});
   const merged=target.store.listImportantDays();
   assert.equal(merged.length,1);assert.equal(merged[0].reminderDays,7);assert.equal(merged[0].note,'闰六月生日');
   assert.equal(merged[0].id,changed.id);assert.equal(merged[0].createdAt,changed.createdAt);
@@ -161,8 +161,8 @@ test('同一份文件内的两条同名同日记录按内容区分，重复导�
   const second=store.saveImportantDay({...solarDay,note:'第二条'});
   const rows=rowsOf(store);
   const target=await fixture();
-  assert.deepEqual(target.store.importImportantDays(rows,'local'),{added:2,updated:0,skipped:0});
-  assert.deepEqual(target.store.importImportantDays(rows,'local'),{added:0,updated:0,skipped:2});
+  assert.deepEqual(target.store.importImportantDays(rows,'local'),{added:2,updated:0,skipped:0,keptLocal:0});
+  assert.deepEqual(target.store.importImportantDays(rows,'local'),{added:0,updated:0,skipped:2,keptLocal:0});
   const ids=target.store.listImportantDays().map(day=>day.id).sort();
   assert.deepEqual(ids,[first.id,second.id].sort());
   store.close();target.store.close();
@@ -193,7 +193,7 @@ test('同一日期名称有多条本地记录时优先匹配内容完全相同�
   const planned=planDayImport(store.listImportantDays(),[orphan]);
   assert.equal(planned.added.length,0);assert.equal(planned.duplicates,1);assert.equal(planned.conflicts.length,0);
   const before=JSON.stringify(store.listImportantDays());
-  assert.deepEqual(store.importImportantDays([orphan],'incoming'),{added:0,updated:0,skipped:1});
+  assert.deepEqual(store.importImportantDays([orphan],'incoming'),{added:0,updated:0,skipped:1,keptLocal:0});
   assert.equal(JSON.stringify(store.listImportantDays()),before);
   assert.equal(store.listImportantDays().find(day=>day.id===first.id)!.note,'备注A');
   // 没有完全相同的候选时仍然只报冲突，写入前不改任何记录。
@@ -230,4 +230,22 @@ test('备注只在可见部分相同、实际不同时，冲突列表会标出�
   assert.match(note.local,/差异在后文/);assert.match(note.incoming,/差异在后文/);
   assert.ok(note.local.length<110);
   store.close();
+});
+
+test('采用导入版本时回填文件里的已提醒节点，改过提醒天数也不会重复弹出',async()=>{
+  const source=await fixture(),target=await fixture();
+  source.store.saveImportantDay(solarDay);
+  source.store.acknowledgeDayReminders(source.store.pendingDayReminders(now).map(reminder=>reminder.key),now);
+  assert.equal(source.store.pendingDayReminders(now).length,0);
+  const rows=rowsOf(source.store);
+  target.store.importImportantDays(rows,'local');
+  const imported=target.store.listImportantDays()[0];
+  // 本机把提前提醒改成 30 天：按表单规则清空该条提醒，于是今天会再次进入待提醒。
+  target.store.saveImportantDay({...imported,reminderDays:30});
+  assert.equal(target.store.pendingDayReminders(now).length,1);
+  assert.deepEqual(target.store.importImportantDays(rows,'incoming'),{added:0,updated:1,skipped:0,keptLocal:0});
+  assert.equal(target.store.listImportantDays()[0].reminderDays,14);
+  // 文件里“今天已提醒过”的节点被写回，采纳导入版本后不再重复提示。
+  assert.equal(target.store.pendingDayReminders(now).length,0);
+  source.store.close();target.store.close();
 });

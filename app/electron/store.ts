@@ -124,7 +124,9 @@ export class Store {
       for(const row of plan.added){this.insertImportedDay(row);added++;}
       if(choice==='incoming')for(const {local,incoming} of plan.conflicts){this.overwriteImportedDay(local,incoming);updated++;}
     });
-    return {added,updated,skipped:plan.duplicates+(choice==='local'?plan.conflicts.length:0)};
+    // Duplicates and "keep local" decisions are reported separately: they mean
+    // different things to the person reading the result.
+    return {added,updated,skipped:plan.duplicates,keptLocal:choice==='local'?plan.conflicts.length:0};
   }
   private insertImportedDay(row:DayFileRecord) {
     const value=validateImportantDay(row);
@@ -135,14 +137,20 @@ export class Store {
     const now=new Date().toISOString(),createdAt=row.createdAt??now,updatedAt=row.updatedAt??createdAt;
     this.db.prepare(`INSERT INTO important_days(id,name,calendar,year,month,day,isLeapMonth,yearly,reminderDays,note,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(id,value.name,value.calendar,value.year,value.month,value.day,Number(value.isLeapMonth),Number(value.yearly),value.reminderDays,value.note,createdAt,updatedAt);
-    const stmt=this.db.prepare('INSERT OR IGNORE INTO day_reminders(key,dayId,seenAt) VALUES(?,?,?)');
-    for(const reminder of row.reminded)stmt.run(`${id}/${reminder.occurrence}/${reminder.stage}${reminder.stage==='advance'?`/${value.reminderDays}`:''}`,id,reminder.seenAt);
+    this.restoreReminders(id,value.reminderDays,row.reminded);
   }
   private overwriteImportedDay(local:ImportantDay,incoming:DayFileRecord) {
     const value=validateImportantDay(incoming),now=new Date().toISOString();
     this.db.prepare(`UPDATE important_days SET name=?,calendar=?,year=?,month=?,day=?,isLeapMonth=?,yearly=?,reminderDays=?,note=?,updatedAt=? WHERE id=?`)
       .run(value.name,value.calendar,value.year,value.month,value.day,Number(value.isLeapMonth),Number(value.yearly),value.reminderDays,value.note,now,local.id);
     if(['calendar','year','month','day','isLeapMonth','yearly','reminderDays'].some(k=>local[k as keyof ImportantDay]!==value[k as keyof ImportantDayInput]))this.db.prepare('DELETE FROM day_reminders WHERE dayId=?').run(local.id);
+    // The file may know about nodes this computer has not shown yet (migration);
+    // restoring them keeps a changed-then-adopted day from prompting twice.
+    this.restoreReminders(local.id,value.reminderDays,incoming.reminded);
+  }
+  private restoreReminders(id:string,reminderDays:number,reminded:DayReminderRecord[]) {
+    const stmt=this.db.prepare('INSERT OR IGNORE INTO day_reminders(key,dayId,seenAt) VALUES(?,?,?)');
+    for(const reminder of reminded)stmt.run(`${id}/${reminder.occurrence}/${reminder.stage}${reminder.stage==='advance'?`/${reminderDays}`:''}`,id,reminder.seenAt);
   }
   private decode(row: Record<string, unknown>): Note {
     return { ...row, document: JSON.parse(String(row.document)), tags: JSON.parse(String(row.tags)), pinned: Boolean(row.pinned) } as unknown as Note;

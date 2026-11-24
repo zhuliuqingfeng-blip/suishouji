@@ -141,8 +141,8 @@ const methods: Record<string, (...args: any[]) => unknown> = {
   backup: async () => {
     const picked = await dialog.showSaveDialog(win!, { title: '备份全部记录', defaultPath: `随手记备份-${fileStamp()}.zip`, filters: [{ name: '随手记备份', extensions: ['zip'] }] });
     if (picked.canceled || !picked.filePath) return null;
-    const destination = path.resolve(picked.filePath), relative = path.relative(dataDir, destination);
-    if (relative === 'notes.sqlite' || relative.startsWith(`attachments${path.sep}`) || relative.startsWith(`.运行缓存${path.sep}`)) throw new Error('请选择一个单独的备份位置，避免覆盖正在使用的数据文件');
+    // Same guard as the important-days export, including case variants.
+    if (isLiveDataPath(dataDir, path.resolve(picked.filePath))) throw new Error('请选择一个单独的备份位置，避免覆盖正在使用的数据文件');
     await exclusive(() => createBackup(store, picked.filePath!)); lastBackup = new Date().toISOString(); return picked.filePath;
   },
   restoreBackup: async () => {
