@@ -40,7 +40,7 @@ try {
   await body.click(); await page.keyboard.press('Control+End'); await page.keyboard.press('Control+V');
   await page.locator('.tiptap img').waitFor({timeout:10000});
   await page.waitForFunction(()=>{const img=document.querySelector('.tiptap img');return img?.complete&&img.naturalWidth>0;});
-  await page.locator('.tiptap img').click(); await page.getByRole('dialog',{name:'查看图片',exact:true}).waitFor(); await page.keyboard.press('Escape');
+  await page.locator('.tiptap img').dblclick(); await page.getByRole('dialog',{name:'查看图片',exact:true}).waitFor(); await page.keyboard.press('Escape');
   await page.getByRole('button',{name:'小',exact:true}).click();
   const source=path.join(root,'周末清单.txt'); await fs.writeFile(source,'相机、笔记本、一杯咖啡。');
   await application.evaluate(({dialog},file)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[file]});},source);

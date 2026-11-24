@@ -1,11 +1,12 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, protocol, net, shell, screen, type MenuItemConstructorOptions } from 'electron';
+import { app, BrowserWindow, clipboard, ClipboardItem, dialog, ipcMain, Menu, protocol, net, shell, screen, type MenuItemConstructorOptions } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Store } from './store.js';
 import { createBackup, validateBackup, applyRestore, recoverInterruptedRestore, exportHtml } from './archive.js';
-import type { Filter, NoteInput, TextMenuAction, TextMenuOptions, ImportantDayInput } from './shared.js';
+import type { ClipboardRevision, Filter, MenuPosition, NoteInput, TextMenuAction, TextMenuOptions, ImportantDayInput } from './shared.js';
+import { windowsClipboardRevision, writeWindowsClipboardImage } from './windows-image-clipboard.js';
 import { fitWindow,readWindowState,writeWindowState } from './window-state.js';
 import {storageLocation} from './storage-location.js';
 import {emptyData,legacyRoot,recoverLegacyImport,pendingLegacyImport,requestLegacyImport,importLegacyData,clearLegacyRequest,importWorkDir} from './legacy-import.js';
@@ -39,6 +40,17 @@ async function dailyBackup() {
   for (const name of archives.sort().slice(0, -7)) await fsp.rm(path.join(directory, name));
   lastBackup = (await fsp.stat(path.join(directory,file))).mtime.toISOString();
 }
+function popupMenu<T>(position: MenuPosition, template: (choose: (action: T) => void) => MenuItemConstructorOptions[]) {
+  return new Promise<T | null>(resolve => {
+    if (!win || !position) throw new Error('无法打开菜单');
+    const [width, height] = win.getContentSize();
+    Menu.buildFromTemplate(template(resolve)).popup({ window: win,
+      x: Math.max(0, Math.min(width - 1, Math.round(position.x) || 0)),
+      y: Math.max(0, Math.min(height - 1, Math.round(position.y) || 0)),
+      callback: () => resolve(null) });
+  });
+}
+
 const methods: Record<string, (...args: any[]) => unknown> = {
   listImportantDays:()=>store.listImportantDays(),saveImportantDay:(input:ImportantDayInput)=>store.saveImportantDay(input),
   removeImportantDay:(id:string)=>store.removeImportantDay(id),pendingDayReminders:()=>store.pendingDayReminders(),
@@ -123,11 +135,39 @@ const methods: Record<string, (...args: any[]) => unknown> = {
     if (typeof text !== 'string') throw new Error('复制内容必须是文字');
     return clipboard.writeText(text);
   },
-  showTextMenu: (options: TextMenuOptions) => new Promise<TextMenuAction | null>(resolve => {
-    if (!win || !options || !['context','toolbar'].includes(options.mode)) throw new Error('无法打开文字菜单');
+  readImageForClipboard: async (id: string) => {
+    let revision: ClipboardRevision | null = null;
+    try { if (process.platform === 'win32') revision = windowsClipboardRevision(); }
+    catch { throw new Error('无法读取系统剪贴板，请重试'); }
+    try {
+      if (typeof id !== 'string') throw new Error();
+      const asset = store.attachment(id);
+      if (asset.kind !== 'image') throw new Error();
+      return { bytes: await fsp.readFile(store.assetPath(asset)), revision };
+    } catch { throw new Error('无法读取原图，可尝试从备份恢复'); }
+  },
+  writeClipboardImage: async (png: Uint8Array, revision: ClipboardRevision | null) => {
+    if (!(png instanceof Uint8Array) || !png.byteLength) throw new Error('图片无法复制，可尝试从备份恢复原图');
+    try {
+      if (process.platform === 'win32') {
+        if (!win || !revision || !Number.isInteger(revision.sequence) || (revision.owner !== null && typeof revision.owner !== 'bigint'))
+          throw new Error('Missing clipboard revision or window');
+        return writeWindowsClipboardImage(win.getNativeWindowHandle(), revision, Buffer.from(png.buffer, png.byteOffset, png.byteLength));
+      }
+      const image = new Blob([new Uint8Array(png)], { type: 'image/png' });
+      await clipboard.write([new ClipboardItem({ 'image/png': image })]);
+      return true;
+    }
+    catch { throw new Error('无法写入系统剪贴板，请重试'); }
+  },
+  showImageMenu: (position: MenuPosition) => popupMenu<true>(position, choose => [
+    { label: '复制图片', click: () => choose(true) }
+  ]),
+  showTextMenu: (options: TextMenuOptions) => popupMenu<TextMenuAction>(options, choose => {
+    if (!['context','toolbar'].includes(options.mode)) throw new Error('无法打开文字菜单');
     const item = (label: string, action: TextMenuAction, enabled: boolean, accelerator?: string): MenuItemConstructorOptions =>
-      ({ label, enabled, accelerator, registerAccelerator: false, click: () => resolve(action) });
-    const template: MenuItemConstructorOptions[] = options.mode === 'context' ? [
+      ({ label, enabled, accelerator, registerAccelerator: false, click: () => choose(action) });
+    return options.mode === 'context' ? [
       { role: 'cut', label: '剪切', enabled: options.editable && options.hasSelection },
       { role: 'copy', label: '复制', enabled: options.hasSelection },
       item('复制为纯文本', 'copyPlain', options.hasText, 'CommandOrControl+Shift+C'),
@@ -140,10 +180,6 @@ const methods: Record<string, (...args: any[]) => unknown> = {
       item('粘贴为纯文本', 'pastePlain', options.editable, 'CommandOrControl+Shift+V'),
       { type: 'separator' }, item('复制全文为纯文本', 'copyAllPlain', true)
     ];
-    const [width,height] = win.getContentSize();
-    const menu = Menu.buildFromTemplate(template);
-    menu.popup({ window: win, x: Math.max(0,Math.min(width-1,Math.round(options.x)||0)),
-      y: Math.max(0,Math.min(height-1,Math.round(options.y)||0)), callback: () => resolve(null) });
   }),
   readyToClose: () => { if (!busy) { mayClose = true; win?.close(); } }
 };

@@ -1,6 +1,6 @@
 {
   "name": "suishouji",
-  "version": "1.8.3",
+  "version": "1.8.4",
   "private": true,
   "description": "完全保存在本地的个人图文随手记",
   "author": "Local Notes",
@@ -22,6 +22,7 @@
     "test:dev": "node scripts/dev-smoke.mjs",
     "test:portable": "node scripts/portable-smoke.mjs",
     "test:clipboard": "node scripts/clipboard-test.mjs",
+    "test:image-copy": "node scripts/image-copy-test.mjs",
     "test:design": "node scripts/design-test.mjs",
     "test:library": "node scripts/library-height-test.mjs",
     "test:home": "node scripts/home-test.mjs",
@@ -48,6 +49,7 @@
       "package.json"
     ],
     "asar": true,
+    "asarUnpack": ["**/@koromix/koffi-*/**/*.node"],
     "npmRebuild": false,
     "win": {
       "target": "dir",
@@ -60,6 +62,7 @@
     }
   },
   "dependencies": {
+    "koffi": "3.3.8",
     "lunar-typescript": "1.8.6",
     "yauzl": "^3.4.0",
     "yazl": "^3.3.1"

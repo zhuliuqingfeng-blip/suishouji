@@ -21,7 +21,9 @@ export interface ImportantDay extends ImportantDayInput { id: string; createdAt:
 export interface DayReminder { key: string; dayId: string; occurrence: string; stage: 'advance' | 'today' }
 export type Result<T> = { ok: true; data: T } | { ok: false; error: string };
 export type TextMenuAction = 'copyPlain' | 'pastePlain' | 'copyAllPlain';
-export interface TextMenuOptions { mode: 'context' | 'toolbar'; hasSelection: boolean; hasText: boolean; editable: boolean; x: number; y: number }
+export interface MenuPosition { x: number; y: number }
+export interface ClipboardRevision { sequence: number; owner: bigint | null }
+export interface TextMenuOptions extends MenuPosition { mode: 'context' | 'toolbar'; hasSelection: boolean; hasText: boolean; editable: boolean }
 export interface NotesAPI {
   listImportantDays(): Promise<ImportantDay[]>; saveImportantDay(input: ImportantDayInput): Promise<ImportantDay>;
   removeImportantDay(id: string): Promise<void>; pendingDayReminders(): Promise<DayReminder[]>;
@@ -40,6 +42,9 @@ export interface NotesAPI {
   info(): Promise<AppInfo>; openDataDir(): Promise<void>;
   importLegacy(): Promise<boolean>; finishInstallSetup(): Promise<void>;
   readClipboardText(): Promise<string>; writeClipboardText(text: string): Promise<void>;
+  readImageForClipboard(id: string): Promise<{bytes: Uint8Array; revision: ClipboardRevision | null}>;
+  writeClipboardImage(png: Uint8Array, revision: ClipboardRevision | null): Promise<boolean>;
+  showImageMenu(position: MenuPosition): Promise<true | null>;
   showTextMenu(options: TextMenuOptions): Promise<TextMenuAction | null>;
   readyToClose(): Promise<void>; onCloseRequested(callback: () => void): () => void;
   onOperation(callback: (busy: boolean) => void): () => void;
